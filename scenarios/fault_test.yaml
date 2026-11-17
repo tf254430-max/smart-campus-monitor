@@ -1,3 +1,6 @@
+# use this with one of the fault circuits: copy diagram_fault_dht.json (DHT22 data wire removed)
+# or diagram_fault_two.json (DHT22 + ultrasonic echo removed) over diagram.json, then run it.
+# the node should keep running and print [WARN] lines instead of hanging.
 name: 'Faulty / disconnected sensor test'
 version: 1
 author: 'Tinka Fahad'

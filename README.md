@@ -100,6 +100,12 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --output-dir build .
 wokwi-cli --scenario scenarios/test_A_library.yaml --timeout 300000 .
 ```
 
+**Fault tests:** to see how the node handles broken sensors, use
+`diagram_fault_dht.json` (DHT22 data wire removed) or `diagram_fault_two.json`
+(DHT22 and ultrasonic echo removed) in place of `diagram.json`. With one sensor
+gone it keeps going ("free - one sensor offline"); with two gone it shows CLOSED
+to be safe. The logs of both runs are in `evidence/serial-logs/`.
+
 ## Test results
 
 All runs below were done in the Wokwi ESP32 simulator. The screenshots are in
