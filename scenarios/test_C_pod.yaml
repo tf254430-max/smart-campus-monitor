@@ -1,0 +1,21 @@
+name: 'Test C - Accessible Study Pod: ramp blocked, cleared, in use'
+version: 1
+author: 'Tinka Fahad (254430)'
+steps:
+  - wait-serial: '[BOOT] ready'
+  - set-control: { part-id: btnPod, control: pressed, value: 1 }
+  - delay: 200ms
+  - set-control: { part-id: btnPod, control: pressed, value: 0 }
+  # C1 pod free -> AVAILABLE
+  - delay: 6000ms
+  # C2 object left on the ramp (25 cm) -> UNAVAILABLE
+  - set-control: { part-id: ultrasonic1, control: distance, value: 25 }
+  - delay: 8000ms
+  # C3 ramp cleared -> AVAILABLE
+  - set-control: { part-id: ultrasonic1, control: distance, value: 250 }
+  - delay: 7000ms
+  # C4 a student goes inside -> CROWDED (pod in use)
+  - set-control: { part-id: btnMotion, control: pressed, value: 1 }   # people moving (held)
+  - delay: 7000ms
+  - wait-serial: 'pod in use'
+  - delay: 5000ms

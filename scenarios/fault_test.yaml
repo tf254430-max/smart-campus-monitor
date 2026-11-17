@@ -1,0 +1,7 @@
+name: 'Faulty / disconnected sensor test'
+version: 1
+author: 'Tinka Fahad'
+steps:
+  - wait-serial: '[BOOT] ready'
+  - delay: 12000ms
+  - wait-serial: '[TEL ]'

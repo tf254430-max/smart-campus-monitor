@@ -1,0 +1,17 @@
+name: 'Test A - Library Zone: free -> busy -> lights off'
+version: 1
+author: 'Tinka Fahad (254430)'
+steps:
+  - wait-serial: '[BOOT] ready'
+  # A1 quiet, bright, 24 C -> AVAILABLE
+  - delay: 8000ms
+  # A2 students moving about + someone at the seat row -> CROWDED
+  - set-control: { part-id: ultrasonic1, control: distance, value: 45 }
+  - set-control: { part-id: btnMotion, control: pressed, value: 1 }   # people moving (held)
+  - delay: 21000ms
+  # A3 students leave, then the lights are switched off -> UNAVAILABLE
+  - set-control: { part-id: btnMotion, control: pressed, value: 0 }
+  - set-control: { part-id: ldr1, control: lux, value: 8 }
+  - delay: 8000ms
+  - wait-serial: 'lights off'
+  - delay: 5000ms

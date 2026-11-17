@@ -1,0 +1,61 @@
+ets Jul 29 2019 12:21:46
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:1156
+load:0x40078000,len:11456
+ho 0 tail 12 room 4
+load:0x40080400,len:2972
+entry 0x400805dc
+=== Smart Campus Resource & Accessibility Monitor ===
+node cuu-main-block-01 | ESP32 | Tinka Fahad 254430
+[BOOT] ready - press a button to choose a facility (default: Library Zone)
+[TEL ] t=2s fac=library | RAW dist=254 temp=24.0 hum=55 lux=411 pir=0 | AVG dist=254 temp=24.0 lux=411 pir30=0.00 | AI occ=0.04 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[ACT ] status -> AVAILABLE : LED GREEN, servo 0 deg, buzzer pattern AVAILABLE
+[TEL ] t=3s fac=library | RAW dist=254 temp=24.0 hum=55 lux=411 pir=0 | AVG dist=254 temp=24.0 lux=411 pir30=0.00 | AI occ=0.04 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[MQTT] connected to broker.hivemq.com:1883 as cuu-254430-c40a24
+[NET ] Wi-Fi connected, IP 10.10.0.2, RSSI -84 dBm
+[TEL ] t=5s fac=library | RAW dist=254 temp=24.0 hum=55 lux=411 pir=0 | AVG dist=254 temp=24.0 lux=411 pir30=0.00 | AI occ=0.04 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=6s fac=library | RAW dist=254 temp=24.0 hum=55 lux=411 pir=0 | AVG dist=254 temp=24.0 lux=411 pir30=0.00 | AI occ=0.04 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=7s fac=library | RAW dist=254 temp=24.0 hum=55 lux=411 pir=0 | AVG dist=254 temp=24.0 lux=411 pir30=0.00 | AI occ=0.04 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=8s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=0 | AVG dist=212 temp=24.0 lux=411 pir30=0.00 | AI occ=0.04 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=9s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=0 | AVG dist=170 temp=24.0 lux=411 pir30=0.00 | AI occ=0.04 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=10s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=129 temp=24.0 lux=411 pir30=0.12 | AI occ=0.08 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=11s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=87 temp=24.0 lux=411 pir30=0.22 | AI occ=0.20 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=12s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.30 | AI occ=0.42 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=13s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.36 | AI occ=0.46 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[MQTT] publish cavendish/bda2201/254430/campus/library -> OK (504 bytes)
+[TEL ] t=14s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.42 | AI occ=0.49 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=15s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.46 | AI occ=0.52 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=16s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.50 | AI occ=0.55 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=17s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.53 | AI occ=0.57 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=18s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.56 | AI occ=0.59 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=19s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.59 | AI occ=0.60 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=20s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.61 | AI occ=0.62 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=21s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.63 | AI occ=0.63 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=22s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.65 | AI occ=0.64 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=23s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.67 | AI occ=0.65 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[MQTT] publish cavendish/bda2201/254430/campus/library -> OK (504 bytes)
+[TEL ] t=24s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.68 | AI occ=0.66 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=25s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.70 | AI occ=0.67 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=26s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.71 | AI occ=0.67 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=27s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.72 | AI occ=0.68 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=28s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.73 | AI occ=0.69 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=29s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.74 | AI occ=0.69 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=30s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.75 | AI occ=0.70 comfort=1.00 | AVAILABLE (free and comfortable) | LED=GREEN servo=0
+[TEL ] t=31s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.76 | AI occ=0.70 comfort=1.00 | CROWDED (busy - occupancy 70%) | LED=AMBER servo=90
+[ACT ] status -> CROWDED : LED AMBER, servo 90 deg, buzzer pattern CROWDED
+[MQTT] publish cavendish/bda2201/254430/campus/library -> OK (500 bytes)
+[HTTP] POST http://httpbin.org/post -> 200 in 2886 ms (1651 bytes back)
+[TEL ] t=34s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=1 | AVG dist=46 temp=24.0 lux=411 pir30=0.77 | AI occ=0.71 comfort=1.00 | CROWDED (busy - occupancy 70%) | LED=AMBER servo=90
+[TEL ] t=35s fac=library | RAW dist=46 temp=24.0 hum=55 lux=411 pir=0 | AVG dist=46 temp=24.0 lux=411 pir30=0.77 | AI occ=0.71 comfort=1.00 | CROWDED (busy - occupancy 70%) | LED=AMBER servo=90
+[TEL ] t=36s fac=library | RAW dist=46 temp=24.0 hum=55 lux= 8 pir=0 | AVG dist=46 temp=24.0 lux=310 pir30=0.77 | AI occ=0.71 comfort=1.00 | CROWDED (busy - occupancy 70%) | LED=AMBER servo=90
+[TEL ] t=37s fac=library | RAW dist=46 temp=24.0 hum=55 lux= 8 pir=0 | AVG dist=46 temp=24.0 lux=210 pir30=0.77 | AI occ=0.71 comfort=1.00 | CROWDED (busy - occupancy 70%) | LED=AMBER servo=90
+[TEL ] t=38s fac=library | RAW dist=46 temp=24.0 hum=55 lux= 8 pir=0 | AVG dist=46 temp=24.0 lux=109 pir30=0.77 | AI occ=0.71 comfort=1.00 | CROWDED (busy - occupancy 70%) | LED=AMBER servo=90
+[TEL ] t=39s fac=library | RAW dist=46 temp=24.0 hum=55 lux= 8 pir=0 | AVG dist=46 temp=24.0 lux=8 pir30=0.77 | AI occ=0.71 comfort=1.00 | UNAVAILABLE (lights off / too dark) | LED=RED servo=180
+[ACT ] status -> UNAVAILABLE : LED RED, servo 180 deg, buzzer pattern UNAVAILABLE
+[MQTT] publish cavendish/bda2201/254430/campus/library -> OK (513 bytes)
+[HTTP] POST http://httpbin.org/post -> 200 in 3521 ms (1677 bytes back)
+[TEL ] t=43s fac=library | RAW dist=46 temp=24.0 hum=55 lux= 8 pir=0 | AVG dist=46 temp=24.0 lux=8 pir30=0.77 | AI occ=0.71 comfort=1.00 | UNAVAILABLE (lights off / too dark) | LED=RED servo=180
+[TEL ] t=44s fac=library | RAW dist=46 temp=24.0 hum=55 lux= 8 pir=0 | AVG dist=46 temp=24.0 lux=8 pir30=0.77 | AI occ=0.71 comfort=1.00 | UNAVAILABLE (lights off / too dark) | LED=RED servo=180

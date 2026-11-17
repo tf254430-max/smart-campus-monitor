@@ -1,0 +1,23 @@
+name: 'Test B - Computer Lab: spike filter, warm (degraded), overheating'
+version: 1
+author: 'Tinka Fahad (254430)'
+steps:
+  - wait-serial: '[BOOT] ready'
+  - set-control: { part-id: btnLab, control: pressed, value: 1 }
+  - delay: 200ms
+  - set-control: { part-id: btnLab, control: pressed, value: 0 }
+  # B1 normal lab -> AVAILABLE
+  - delay: 7000ms
+  # B2 a 2-second glitch to 45 C (loose wire / sun on the sensor) -> ignored by the spike filter
+  - set-control: { part-id: dht1, control: temperature, value: 45 }
+  - delay: 2200ms
+  - set-control: { part-id: dht1, control: temperature, value: 24 }
+  - delay: 5000ms
+  # B3 lab warms up to 31.5 C -> CROWDED (degraded comfort)
+  - set-control: { part-id: dht1, control: temperature, value: 31.5 }
+  - delay: 9000ms
+  # B4 overheating 34 C -> UNAVAILABLE
+  - set-control: { part-id: dht1, control: temperature, value: 34 }
+  - delay: 8000ms
+  - wait-serial: 'too hot'
+  - delay: 5000ms

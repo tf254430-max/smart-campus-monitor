@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Campus Monitor - Live Dashboard</title>
+<!-- MQTT over secure WebSockets, same broker the ESP32 publishes to -->
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+  :root { --bg:#0f172a; --card:#111c33; --line:#22314f; --txt:#e2e8f0; --mute:#94a3b8;
+          --ok:#16a34a; --busy:#f59e0b; --no:#dc2626; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:'Segoe UI',Arial,sans-serif; background:var(--bg); color:var(--txt); }
+  header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:20px; margin:0; }
+  header .sub { color:var(--mute); font-size:13px; }
+  .pill { margin-left:auto; padding:6px 12px; border-radius:999px; font-size:13px; background:#1e293b; }
+  .pill.on { background:#14532d; } .pill.off { background:#7f1d1d; }
+  main { padding:20px 24px; display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .card h2 { margin:0 0 6px; font-size:16px; }
+  .status { font-size:26px; font-weight:800; margin:6px 0 2px; }
+  .AVAILABLE { color:var(--ok); } .CROWDED { color:var(--busy); } .UNAVAILABLE { color:var(--no); }
+  .reason { color:var(--mute); font-size:13px; min-height:18px; }
+  table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
+  td { padding:4px 0; border-bottom:1px dashed var(--line); } td:last-child { text-align:right; }
+  .warn { color:#fca5a5; font-size:12px; margin-top:6px; min-height:16px; }
+  .meta { color:var(--mute); font-size:12px; margin-top:8px; }
+  #log { grid-column:1/-1; }
+  #log pre { margin:0; max-height:260px; overflow:auto; font-size:12px; color:#cbd5e1; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Smart Campus Resource &amp; Accessibility Monitor</h1>
+    <div class="sub">Cavendish University Uganda · BDA 2201 CAT 2 · Tinka Fahad (254430) · MQTT broker.hivemq.com</div>
+  </div>
+  <span id="conn" class="pill">connecting…</span>
+</header>
+<main>
+  <section class="card" id="card-library"><h2>📚 Library Zone</h2><div class="status">waiting…</div><div class="reason"></div><table></table><div class="warn"></div><div class="meta"></div></section>
+  <section class="card" id="card-lab"><h2>💻 Computer Lab</h2><div class="status">waiting…</div><div class="reason"></div><table></table><div class="warn"></div><div class="meta"></div></section>
+  <section class="card" id="card-pod"><h2>♿ Accessible Study Pod</h2><div class="status">waiting…</div><div class="reason"></div><table></table><div class="warn"></div><div class="meta"></div></section>
+  <section class="card" id="log"><h2>Message log (newest first)</h2><pre></pre></section>
+</main>
+<script>
+  const BASE = 'cavendish/bda2201/254430/campus/';
+  const conn = document.getElementById('conn');
+  const logEl = document.querySelector('#log pre');
+  const fmt = (v, unit) => (v === null || v === undefined) ? '<span style="color:#fca5a5">sensor offline</span>' : v + (unit || '');
+
+  function render(key, p) {
+    const card = document.getElementById('card-' + key);
+    if (!card) return;
+    const st = card.querySelector('.status');
+    st.textContent = p.status + (p.low_confidence ? ' *' : '');
+    st.className = 'status ' + p.status;
+    card.querySelector('.reason').textContent = p.reason || '';
+    const t = p.telemetry || {}, ai = p.edge_ai || {}, a = p.actuators || {}, n = p.network || {};
+    card.querySelector('table').innerHTML =
+      `<tr><td>Distance (seat row / ramp)</td><td>${fmt(t.distance_cm, ' cm')}</td></tr>` +
+      `<tr><td>Temperature / humidity</td><td>${fmt(t.temp_c, ' °C')} / ${fmt(t.humidity_pct, ' %')}</td></tr>` +
+      `<tr><td>Light</td><td>${fmt(t.light_lux, ' lux')}</td></tr>` +
+      `<tr><td>Motion now / last 30 s</td><td>${t.motion ? 'yes' : 'no'} / ${Math.round((t.pir_ratio_30s || 0) * 100)}%</td></tr>` +
+      `<tr><td>Edge AI occupancy score</td><td>${Math.round((ai.occupancy_score || 0) * 100)}%</td></tr>` +
+      `<tr><td>Comfort index</td><td>${ai.comfort_index === null || ai.comfort_index === undefined ? 'n/a' : ai.comfort_index}</td></tr>` +
+      `<tr><td>Actuators</td><td>LED ${a.rgb} · servo ${a.servo_deg}° · buzzer ${a.buzzer}</td></tr>`;
+    const faults = p.sensor_faults || [];
+    card.querySelector('.warn').textContent =
+      (faults.length ? '⚠ Sensor fault: ' + faults.join(', ') + ' — decision made with the remaining sensors. ' : '') +
+      (ai.spike_detected ? '⚠ Sudden spike ignored by the anomaly filter.' : '');
+    card.querySelector('.meta').textContent =
+      `Last update ${new Date().toLocaleTimeString()} · uptime ${p.uptime_s}s · Wi-Fi RSSI ${n.rssi_dbm} dBm · last HTTP ${n.last_http_code || '-'} in ${n.last_http_ms || '-'} ms · node ${p.node}`;
+  }
+
+  const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
+    clientId: 'cuu-dashboard-' + Math.random().toString(16).slice(2, 8), reconnectPeriod: 3000,
+  });
+  client.on('connect', () => {
+    conn.textContent = 'MQTT connected'; conn.className = 'pill on';
+    client.subscribe(BASE + '#', { qos: 0 });
+  });
+  client.on('close', () => { conn.textContent = 'MQTT disconnected – retrying'; conn.className = 'pill off'; });
+  client.on('message', (topic, buf) => {
+    let p; try { p = JSON.parse(buf.toString()); } catch (e) { return; }
+    const key = topic.substring(BASE.length);
+    render(key, p);
+    const line = `${new Date().toLocaleTimeString()}  ${topic}  ${p.status}  (${p.reason})  ${buf.length} bytes`;
+    logEl.textContent = line + '\n' + logEl.textContent;
+  });
+</script>
+</body>
+</html>

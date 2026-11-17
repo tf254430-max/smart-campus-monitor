@@ -1,0 +1,18 @@
+ets Jul 29 2019 12:21:46
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:1156
+load:0x40078000,len:11456
+ho 0 tail 12 room 4
+load:0x40080400,len:2972
+entry 0x400805dc
+=== Smart Campus Resource & Accessibility Monitor ===
+node cuu-main-block-01 | ESP32 | Tinka Fahad 254430
+[BOOT] ready - press a button to choose a facility (default: Library Zone)
+[TEL ] t=2s fac=library | RAW dist=ERR temp=ERR hum=ERR lux=411 pir=0 | AVG dist=nan temp=nan lux=411 pir30=0.00 | AI occ=0.12 comfort=n/a | UNAVAILABLE (sensors offline - status unknown) | LED=RED servo=180
+[WARN] ultrasonic: no echo (unplugged or out of range) - using other sensors
+[WARN] DHT22: read failed - comfort check skipped
+[ACT ] status -> UNAVAILABLE : LED RED, servo 180 deg, buzzer pattern UNAVAILABLE
+[NET ] Wi-Fi connected, IP 10.10.0.2, RSSI -91 dBm

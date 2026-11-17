@@ -1,0 +1,4 @@
+[wokwi]
+version = 1
+firmware = 'build/SmartCampusMonitor.ino.merged.bin'
+elf = 'build/SmartCampusMonitor.ino.elf'

@@ -1,0 +1,20 @@
+name: 'LDR calibration'
+version: 1
+author: 'Tinka Fahad'
+steps:
+  - wait-serial: '[BOOT] ready'
+  - set-control: { part-id: ldr1, control: lux, value: 10 }
+  - delay: 3000ms
+  - wait-serial: 'TEL'
+  - set-control: { part-id: ldr1, control: lux, value: 50 }
+  - delay: 3000ms
+  - wait-serial: 'TEL'
+  - set-control: { part-id: ldr1, control: lux, value: 150 }
+  - delay: 3000ms
+  - wait-serial: 'TEL'
+  - set-control: { part-id: ldr1, control: lux, value: 400 }
+  - delay: 3000ms
+  - wait-serial: 'TEL'
+  - set-control: { part-id: ldr1, control: lux, value: 1000 }
+  - delay: 3000ms
+  - wait-serial: 'TEL'
