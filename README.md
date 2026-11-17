@@ -10,6 +10,8 @@ reads its sensors, decides on the board itself whether the space is
 movement, sound and text, and sends every reading to a live web dashboard over
 Wi-Fi.
 
+**Run it in Wokwi:** https://wokwi.com/projects/480950410010713089 (press the green Start button; the first build may wait a minute in Wokwi's free queue)
+
 **Live dashboard:** https://tf254430-max.github.io/smart-campus-monitor/dashboard/
 (it subscribes to the same MQTT topics the ESP32 publishes to; the last message
 from each facility is kept on the broker, so the cards fill in even when the
@@ -84,7 +86,7 @@ line. On every status change, and as a heartbeat every 10 s, the node:
 
 ## Running it
 
-**In the browser:** create a new ESP32 project on wokwi.com, then paste in
+**In the browser:** open the Wokwi link at the top of this page and press ▶. Or create a new ESP32 project on wokwi.com and paste in
 `SmartCampusMonitor.ino` (as `sketch.ino`), `diagram.json` and `libraries.txt`.
 Press ▶. Use the three coloured buttons to choose a facility, and click a sensor
 to change its value (distance, temperature, light) or press *Simulate motion* on
