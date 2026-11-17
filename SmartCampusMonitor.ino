@@ -56,7 +56,7 @@ const char* WIFI_PASS  = "";
 const char* MQTT_HOST  = "broker.hivemq.com";
 const int   MQTT_PORT  = 1883;
 const char* MQTT_BASE  = "cavendish/bda2201/254430/campus";   // + /<facility>
-const char* HTTP_URL   = "http://httpbin.org/post";           // echoes our JSON back
+const char* HTTP_URL   = "http://httpbin.org/post";           // echoes the JSON back
 
 // ---------------- Calibration ----------------
 const float LUX_CAL = 0.825f;             // see readLux()
@@ -274,7 +274,7 @@ void classify() {
   int faults = (!raw.distOk) + (!raw.dhtOk) + (!raw.ldrOk);
   lowConfidence = faults > 0 || raw.spike;
 
-  // 1) Occupancy: small logistic model (weights calibrated on our test runs).
+  // 1) Occupancy: small logistic model (weights tuned on my test runs).
   //    closeness = how near the nearest person/bag is to the seat-row sensor.
   float closeness = haveDist ? clamp01((150.0f - dist) / 120.0f) : 0.5f;   // unknown -> neutral
   float heat = haveDht ? clamp01((temp - 24.0f) / 8.0f) : 0.0f;            // body heat in a full room

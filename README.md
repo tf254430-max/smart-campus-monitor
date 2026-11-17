@@ -49,16 +49,16 @@ simulation is not running).
 ## How the decision is made (edge AI)
 
 1. **Clean the readings.** Each sensor has its own moving-average window
-   (distance 5, light 4, temperature/humidity 8). A reading that jumps more than
-   3 standard deviations from the recent average is treated as a spike and
-   ignored. If it is still there after 3 readings it is a real change, and the
-   window restarts at the new level.
+   (distance 5, light 4, temperature/humidity 8). Temperature also goes through
+   a spike filter: a reading more than 4 °C (or 3 standard deviations, whichever is bigger) away from
+   the recent average is flagged and ignored. If it is still there after 3
+   readings it is a real change, and the window restarts at the new level.
 2. **Estimate occupancy.** A small logistic model combines how often the PIR
    fired in the last 30 s, how close the nearest person is and how warm the
    room is:
    `occupancy = 1 / (1 + e^-(−3.2 + 2.6·pir + 2.4·closeness + 0.9·heat))`
-3. **Comfort index** (0–1) from temperature, humidity and light against the
-   limits for that facility.
+3. **Comfort index** (0–1) from temperature and humidity against the limits
+   for that facility. Light is checked separately in the rules.
 4. **Rules** turn these into a status:
    * UNAVAILABLE: pod ramp blocked, too hot, too dark, or two sensors offline
    * CROWDED: pod in use, occupancy ≥ 70 %, or poor comfort
