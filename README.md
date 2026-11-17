@@ -33,6 +33,9 @@ simulation is not running).
 
 ## Hardware
 
+![Circuit schematic](evidence/schematic.png)
+
+
 | Part | ESP32 pin | Job |
 |---|---|---|
 | HC-SR04 ultrasonic | TRIG 5, ECHO 18 | Distance to the seat row / pod ramp |

@@ -1,25 +1,21 @@
 /*
-  Smart Campus Resource & Accessibility Monitor
-  BDA 2201 Microprocessors and Microcontrollers - CAT 2
-  Tinka Fahad (254430), Cavendish University Uganda
-
-  One ESP32 node that a student can walk up to (or listen to) and ask:
-  "Is the Library Zone / Computer Lab / Accessible Study Pod free right now?"
-
-  Inputs  : HC-SR04 ultrasonic (seat row / ramp clearance), PIR motion,
-            DHT22 (temperature + humidity), LDR light sensor,
-            3 push-buttons (one per facility).
-  Edge AI : moving-average filters, button debouncing, z-score spike
-            detection, a small logistic occupancy model and comfort rules
-            -> AVAILABLE / CROWDED / UNAVAILABLE.
-  Outputs : RGB LED, servo "status flag", buzzer tone patterns (for blind
-            students), SSD1306 OLED (facility name + live status).
-  Network : Wi-Fi -> MQTT (live dashboard) + HTTP POST (response metadata).
-
-  Every sensor reading is checked. A disconnected or faulty sensor never
-  crashes the node: it is reported, dropped from the decision, and the
-  status is marked as lower confidence.
-*/
+ * Smart Campus Resource & Accessibility Monitor
+ * BDA 2201 Microprocessors & Microcontrollers - CAT 2
+ * Tinka Fahad, 254430
+ *
+ * A student presses the button for the Library Zone, Computer Lab or the
+ * Accessible Study Pod and the node tells them if it is free right now.
+ * Answer is given 4 ways: RGB LED, servo flag, buzzer beeps (for blind
+ * students) and the OLED screen. Every reading is also sent over wifi
+ * (MQTT for the dashboard + HTTP POST so I can see the response code/time).
+ *
+ * sensors: HC-SR04, PIR, DHT22, LDR module
+ * decision: averages + spike filter -> logistic occupancy score + comfort
+ *           -> AVAILABLE / CROWDED / UNAVAILABLE
+ *
+ * If a sensor stops working the node must not hang. It prints a WARN line,
+ * leaves that sensor out and carries on with the others.
+ */
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -32,73 +28,77 @@
 #include <ESP32Servo.h>
 #include <math.h>
 
-// ---------------- Pin map (see wiring table in the report) ----------------
-const int PIN_TRIG   = 5;    // HC-SR04 trigger
-const int PIN_ECHO   = 18;   // HC-SR04 echo
-const int PIN_PIR    = 27;   // PIR motion output
-const int PIN_MOTION_TEST = 4;   // 'Motion test' button: lets automated tests inject motion
-                                 // (Wokwi scenarios cannot click the PIR); held = person moving
-const int PIN_DHT    = 15;   // DHT22 data
-const int PIN_LDR    = 34;   // LDR module analog out (ADC1, input only)
-const int PIN_BTN_LIB = 32;  // "Library Zone" button
-const int PIN_BTN_LAB = 33;  // "Computer Lab" button
-const int PIN_BTN_POD = 25;  // "Accessible Study Pod" button
-const int PIN_LED_R  = 13;   // RGB LED red
-const int PIN_LED_G  = 14;   // RGB LED green
-const int PIN_LED_B  = 26;   // RGB LED blue
-const int PIN_SERVO  = 19;   // status flag servo
-const int PIN_BUZZER = 23;   // piezo buzzer
-// OLED on the default I2C pins: SDA = 21, SCL = 22
+// pins
+const int PIN_TRIG = 5;
+const int PIN_ECHO = 18;
+const int PIN_PIR = 27;
+// wokwi's PIR only gives a short pulse when you click "Simulate motion",
+// so I added a button on GPIO4 for testing. holding it = someone moving.
+// (not needed on the real board)
+const int PIN_MOTION_TEST = 4;
+const int PIN_DHT = 15;
+const int PIN_LDR = 34;      // must be an ADC1 pin, ADC2 can't be read when wifi is on
+const int PIN_BTN_LIB = 32;
+const int PIN_BTN_LAB = 33;
+const int PIN_BTN_POD = 25;
+const int PIN_LED_R = 13;
+const int PIN_LED_G = 14;
+const int PIN_LED_B = 26;
+const int PIN_SERVO = 19;
+const int PIN_BUZZER = 23;
+// OLED uses the normal I2C pins, SDA 21 and SCL 22
 
-// ---------------- Network settings ----------------
-const char* WIFI_SSID  = "Wokwi-GUEST";   // Wokwi's simulated access point
-const char* WIFI_PASS  = "";
-const char* MQTT_HOST  = "broker.hivemq.com";
-const int   MQTT_PORT  = 1883;
-const char* MQTT_BASE  = "cavendish/bda2201/254430/campus";   // + /<facility>
-const char* HTTP_URL   = "http://httpbin.org/post";           // echoes the JSON back
+// wifi / mqtt / http
+const char* WIFI_SSID = "Wokwi-GUEST";
+const char* WIFI_PASS = "";
+const char* MQTT_HOST = "broker.hivemq.com";
+const int MQTT_PORT = 1883;
+const char* MQTT_BASE = "cavendish/bda2201/254430/campus";   // facility name is added at the end
+const char* HTTP_URL = "http://httpbin.org/post";            // httpbin just sends back what we post
 
-// ---------------- Calibration ----------------
-const float LUX_CAL = 0.825f;             // see readLux()
-const unsigned long SENSOR_WARMUP_MS = 2500;   // DHT22 needs ~2 s after power-up
+// first run gave about 725 lux when the slider was on 400. after switching to
+// analogReadMilliVolts it was still ~21% high, so I tested 5 levels and scale by 0.825
+const float LUX_CAL = 0.825f;
+const unsigned long SENSOR_WARMUP_MS = 2500;   // DHT22 gives errors in the first ~2s
 
-// ---------------- Status + facility definitions ----------------
 enum Status { AVAILABLE, CROWDED, UNAVAILABLE };
 const char* STATUS_NAME[] = { "AVAILABLE", "CROWDED", "UNAVAILABLE" };
 
 enum FacilityId { LIBRARY = 0, LAB = 1, POD = 2 };
 
+// each facility has its own limits
 struct Facility {
-  const char* name;      // shown on the OLED and dashboard
-  const char* key;       // used in the MQTT topic
-  float minLux;          // below this the room is too dark to use
-  float comfortMaxC;     // above this the room feels hot -> CROWDED/DEGRADED
-  float unsafeMaxC;      // above this the room is not usable
-  float blockedCm;       // ultrasonic: something this close = ramp/door blocked (pod only)
-  bool  singleUser;      // a pod is "in use" as soon as one person is inside
+  const char* name;
+  const char* key;       // goes in the mqtt topic
+  float minLux;          // darker than this = poor light
+  float comfortMaxC;     // hotter than this = uncomfortable
+  float unsafeMaxC;      // hotter than this = closed
+  float blockedCm;       // pod only: object closer than this = ramp blocked
+  bool singleUser;       // pod is "in use" once one person is inside
 };
 
+// library needs more light for reading, lab is kept cooler because of the PCs
 Facility FACILITIES[3] = {
-  { "Library Zone",          "library", 150.0, 28.0, 35.0,  0.0, false },
-  { "Computer Lab",          "lab",      80.0, 27.0, 33.0,  0.0, false },
-  { "Accessible Study Pod",  "pod",      80.0, 28.0, 35.0, 40.0, true  },
+  { "Library Zone", "library", 150.0, 28.0, 35.0, 0.0, false },
+  { "Computer Lab", "lab", 80.0, 27.0, 33.0, 0.0, false },
+  { "Accessible Study Pod", "pod", 80.0, 28.0, 35.0, 40.0, true },
 };
 
-// ---------------- Hardware objects ----------------
 Adafruit_SSD1306 oled(128, 64, &Wire, -1);
 DHTesp dht;
 Servo flagServo;
-WiFiClient netClient;          // used only by MQTT
-WiFiClient httpClient;         // separate socket for HTTP so a POST never drops the MQTT session
+WiFiClient netClient;    // for mqtt
+WiFiClient httpClient;   // http gets its own client. when they shared one, every POST dropped the mqtt connection
 PubSubClient mqtt(netClient);
 
-// ---------------- Small helper: moving average + spike (z-score) detector ----------------
+// moving average with a spike check.
+// used for all the analog-ish readings, the spike check is only used on temperature
 struct Smoother {
   static const int MAX = 8;
-  int N;                       // window length chosen per sensor
+  int N;              // window size
   float buf[MAX];
   int count = 0, idx = 0;
-  int suspect = 0;             // consecutive readings that looked like spikes
+  int suspect = 0;    // how many odd readings in a row
   explicit Smoother(int n) : N(n) {}
   void add(float v) { buf[idx] = v; idx = (idx + 1) % N; if (count < N) count++; }
   float mean() const { float s = 0; for (int i = 0; i < count; i++) s += buf[i]; return count ? s / count : NAN; }
@@ -108,67 +108,66 @@ struct Smoother {
     for (int i = 0; i < count; i++) s += (buf[i] - m) * (buf[i] - m);
     return sqrt(s / (count - 1));
   }
-  // true when v is far from the recent average (sudden jump / glitch)
+  // spike = far away from the average (more than minJump or 3 std devs)
   bool isSpike(float v, float minJump) const {
     if (count < 4) return false;
     float m = mean(), sd = stdev();
     return fabs(v - m) > max(minJump, 3.0f * sd);
   }
   void reset() { count = 0; idx = 0; suspect = 0; }
-  // Spike-aware add: a single odd reading is ignored (returns true = spike),
-  // but if it stays for 3 readings in a row it is a real change and is accepted.
+  // returns true if the reading was thrown away as a spike.
+  // if the "spike" is still there after 3 readings then it's a real change,
+  // so start the average again from the new value
   bool addFiltered(float v, float minJump) {
     if (isSpike(v, minJump) && ++suspect < 3) return true;
-    if (suspect >= 3) reset();          // real step change: restart the window at the new level
+    if (suspect >= 3) reset();
     suspect = 0;
     add(v);
     return false;
   }
 };
 
-// Window lengths: light and distance change in steps (lights on/off, person
-// sits down) so they react fast; temperature/humidity drift slowly so they
-// are smoothed more.
+// distance and light jump (someone sits, lights go off) so short windows.
+// temp/humidity change slowly so a longer window is fine
 Smoother sDist(5), sTemp(8), sHum(8), sLux(4);
 
-// PIR history: 1 sample per second for the last 30 s -> "how busy" ratio
+// last 30 PIR samples (1 per second) -> fraction of time with movement
 const int PIR_WINDOW = 30;
 uint8_t pirHist[PIR_WINDOW];
 int pirCount = 0, pirIdx = 0;
 
-// ---------------- Live state ----------------
 struct Reading {
   float distCm = NAN, tempC = NAN, humPct = NAN, lux = NAN;
-  bool  motion = false;
-  bool  distOk = false, dhtOk = false, ldrOk = false;
-  bool  spike = false;
+  bool motion = false;
+  bool distOk = false, dhtOk = false, ldrOk = false;
+  bool spike = false;
 };
 
-Reading raw;                       // last raw reading
-FacilityId current = LIBRARY;      // facility the student asked about
-Status status = AVAILABLE, lastStatus = (Status)255;   // 255 = 'nothing announced yet' -> first decision is announced + published
+Reading raw;
+FacilityId current = LIBRARY;
+// lastStatus starts as 255 so the very first decision is announced and sent
+Status status = AVAILABLE, lastStatus = (Status)255;
 float occScore = 0, comfortIdx = 1;
 String reason = "starting up";
 bool lowConfidence = false;
 unsigned long bootMs = 0;
 
-// network bookkeeping (shown on the dashboard as "network response metadata")
+// kept so the dashboard can show the network response info
 int lastHttpCode = 0;
 unsigned long lastHttpMs = 0;
 bool lastMqttOk = false;
 unsigned long lastMqttTry = 0, lastHttpPost = 0, lastWifiTry = 0;
 int wifiRetries = 0;
 
-// ---------------- Buttons with debouncing ----------------
 struct Button {
   int pin; FacilityId fac; bool stable = true; bool lastRaw = true; unsigned long changedAt = 0;
 };
 Button buttons[3] = { { PIN_BTN_LIB, LIBRARY }, { PIN_BTN_LAB, LAB }, { PIN_BTN_POD, POD } };
 const unsigned long DEBOUNCE_MS = 40;
 
-// ---------------- Non-blocking buzzer patterns ----------------
-// A pattern is a list of (tone Hz, on ms, off ms). Blind students learn:
-//   1 high beep = AVAILABLE, 2 medium beeps = CROWDED, 3 low long beeps = UNAVAILABLE
+/* buzzer
+   1 high beep = free, 2 medium beeps = busy, 3 long low beeps = closed.
+   played step by step from loop() so it doesn't block with delay() */
 struct Beep { int hz; int onMs; int offMs; };
 Beep pattern[4]; int patternLen = 0, patternStep = -1; unsigned long stepAt = 0; bool beepOn = false;
 
@@ -178,7 +177,7 @@ void playPattern(const Beep* p, int n) {
 }
 
 void serviceBuzzer() {
-  if (patternStep < 0) return;
+  if (patternStep < 0) return;   // nothing playing
   unsigned long now = millis();
   if (!beepOn) {
     if (now >= stepAt) {
@@ -193,37 +192,38 @@ void serviceBuzzer() {
 }
 
 void announceStatus(Status s) {
-  static const Beep okB[]   = { {1760, 120, 80} };
+  static const Beep okB[] = { {1760, 120, 80} };
   static const Beep busyB[] = { {988, 160, 140}, {988, 160, 80} };
-  static const Beep noB[]   = { {440, 400, 200}, {440, 400, 200}, {440, 400, 80} };
+  static const Beep noB[] = { {440, 400, 200}, {440, 400, 200}, {440, 400, 80} };
   if (s == AVAILABLE) playPattern(okB, 1);
   else if (s == CROWDED) playPattern(busyB, 2);
   else playPattern(noB, 3);
 }
 
-// ---------------- Sensor reading with error handling ----------------
+// ---- reading the sensors ----
+// each function sets ok=false when the reading can't be trusted
+
 float readDistanceCm(bool& ok) {
-  digitalWrite(PIN_TRIG, LOW);  delayMicroseconds(2);
+  digitalWrite(PIN_TRIG, LOW); delayMicroseconds(2);
   digitalWrite(PIN_TRIG, HIGH); delayMicroseconds(10);
   digitalWrite(PIN_TRIG, LOW);
-  unsigned long us = pulseIn(PIN_ECHO, HIGH, 30000UL);   // 30 ms ~ 5 m max
-  if (us == 0) { ok = false; return NAN; }               // no echo: unplugged / out of range
+  // 30ms timeout (about 5m). without it pulseIn waits 1s when the sensor is unplugged
+  unsigned long us = pulseIn(PIN_ECHO, HIGH, 30000UL);
+  if (us == 0) { ok = false; return NAN; }
   float cm = us / 58.0f;
-  ok = (cm >= 2.0f && cm <= 400.0f);                     // HC-SR04 valid range
+  ok = (cm >= 2.0f && cm <= 400.0f);   // HC-SR04 range
   return ok ? cm : NAN;
 }
 
 float readLux(bool& ok) {
-  // analogReadMilliVolts() uses the ESP32's factory ADC calibration,
-  // which is far more accurate than scaling the raw 0..4095 count.
+  // analogReadMilliVolts uses the chip's own ADC calibration,
+  // plain analogRead()/4095 was way off
   float volts = analogReadMilliVolts(PIN_LDR) / 1000.0f;
-  // The module is a voltage divider; convert the voltage to lux
-  // (formula from the Wokwi photoresistor datasheet, gamma 0.7, RL10 50k).
-  if (volts <= 0.01f || volts >= 3.29f) { ok = false; return NAN; }  // rail = open / shorted wire
+  // 0V or 3.3V means a broken/shorted wire, not real light
+  if (volts <= 0.01f || volts >= 3.29f) { ok = false; return NAN; }
+  // voltage divider -> LDR resistance -> lux (gamma 0.7, RL10 50k from the wokwi LDR docs)
   float resistance = 2000.0f * volts / (1.0f - volts / 3.3f);
   float lux = pow(50.0f * 1e3f * pow(10.0f, 0.7f) / resistance, 1.0f / 0.7f);
-  // 5-point calibration (10/50/150/400/1000 lux reference levels) showed the
-  // raw formula reads about 21% high on the ESP32 ADC -> scale by 0.825.
   lux *= LUX_CAL;
   ok = isfinite(lux);
   return ok ? lux : NAN;
@@ -238,17 +238,16 @@ void sampleSensors() {
   if (raw.dhtOk) { raw.tempC = th.temperature; raw.humPct = th.humidity; }
 
   raw.lux = readLux(raw.ldrOk);
-  // motion = the PIR output, OR the test button (wired-OR in software)
   raw.motion = digitalRead(PIN_PIR) == HIGH || digitalRead(PIN_MOTION_TEST) == LOW;
 
-  // Spike (anomaly) filter on temperature: one glitch is reported and ignored,
-  // so it can't poison the average; a lasting change is accepted after 3 s.
+  // a single crazy temperature (e.g. 45C for one reading) shouldn't close the lab,
+  // so it goes through the spike filter. 4C is the smallest jump counted as a spike
   if (raw.dhtOk) {
     if (sTemp.addFiltered(raw.tempC, 4.0f)) raw.spike = true;
     else sHum.add(raw.humPct);
   }
   if (raw.distOk) sDist.add(raw.distCm);
-  if (raw.ldrOk)  sLux.add(raw.lux);
+  if (raw.ldrOk) sLux.add(raw.lux);
 
   pirHist[pirIdx] = raw.motion ? 1 : 0;
   pirIdx = (pirIdx + 1) % PIR_WINDOW;
@@ -261,27 +260,28 @@ float pirRatio() {
   return (float)s / pirCount;
 }
 
-// ---------------- Edge AI: decide the facility state ----------------
 float clamp01(float x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
 
+// ---- the "edge AI" part: decide the status ----
 void classify() {
   const Facility& f = FACILITIES[current];
   float dist = sDist.mean(), temp = sTemp.mean(), hum = sHum.mean(), lux = sLux.mean();
   bool haveDist = raw.distOk && !isnan(dist);
-  bool haveDht  = raw.dhtOk  && !isnan(temp);
-  bool haveLux  = raw.ldrOk  && !isnan(lux);
+  bool haveDht = raw.dhtOk && !isnan(temp);
+  bool haveLux = raw.ldrOk && !isnan(lux);
 
   int faults = (!raw.distOk) + (!raw.dhtOk) + (!raw.ldrOk);
   lowConfidence = faults > 0 || raw.spike;
 
-  // 1) Occupancy: small logistic model (weights tuned on my test runs).
-  //    closeness = how near the nearest person/bag is to the seat-row sensor.
-  float closeness = haveDist ? clamp01((150.0f - dist) / 120.0f) : 0.5f;   // unknown -> neutral
-  float heat = haveDht ? clamp01((temp - 24.0f) / 8.0f) : 0.0f;            // body heat in a full room
+  // occupancy = logistic function of motion, how close someone is, and heat.
+  // weights picked by trying them on my test runs:
+  //   empty ~4%, moving but far ~35%, moving + someone at the seats ~70%
+  float closeness = haveDist ? clamp01((150.0f - dist) / 120.0f) : 0.5f;   // no distance -> 0.5 (don't know)
+  float heat = haveDht ? clamp01((temp - 24.0f) / 8.0f) : 0.0f;
   float z = -3.2f + 2.6f * pirRatio() + 2.4f * closeness + 0.9f * heat;
   occScore = 1.0f / (1.0f + exp(-z));
 
-  // 2) Comfort index (1 = comfortable, 0 = unbearable) from temperature + humidity.
+  // comfort: 1 = fine, 0 = can't use it. goes down with heat and with humidity over 70%
   if (haveDht) {
     float hot = clamp01((temp - f.comfortMaxC) / (f.unsafeMaxC - f.comfortMaxC));
     float damp = clamp01((hum - 70.0f) / 25.0f);
@@ -290,10 +290,12 @@ void classify() {
     comfortIdx = NAN;
   }
 
-  // 3) Decision rules, worst condition wins.
+  // rules, worst first
   Status s = AVAILABLE;
   reason = "free and comfortable";
 
+  // pod: something close that never moves = bag/chair on the ramp.
+  // if it moves it's a person going in, that's handled below
   if (f.blockedCm > 0 && haveDist && dist < f.blockedCm && !raw.motion && pirRatio() < 0.1f) {
     s = UNAVAILABLE; reason = "ramp/door blocked by an object";
   } else if (haveDht && temp >= f.unsafeMaxC) {
@@ -301,6 +303,7 @@ void classify() {
   } else if (haveLux && lux < f.minLux * 0.3f) {
     s = UNAVAILABLE; reason = "lights off / too dark";
   } else if (faults >= 2) {
+    // with 2 sensors dead I can't honestly say it's free
     s = UNAVAILABLE; reason = "sensors offline - status unknown";
   } else if (f.singleUser && (raw.motion || pirRatio() > 0.2f)) {
     s = CROWDED; reason = "pod in use";
@@ -317,16 +320,16 @@ void classify() {
   status = s;
 }
 
-// ---------------- Actuators ----------------
+// ---- outputs ----
 void setRgb(bool r, bool g, bool b) { digitalWrite(PIN_LED_R, r); digitalWrite(PIN_LED_G, g); digitalWrite(PIN_LED_B, b); }
 
 const char* driveActuators() {
   int angle;
   const char* colour;
   switch (status) {
-    case AVAILABLE:   setRgb(0, 1, 0); angle = 0;   colour = "GREEN"; break;
-    case CROWDED:     setRgb(1, 1, 0); angle = 90;  colour = "AMBER"; break;
-    default:          setRgb(1, 0, 0); angle = 180; colour = "RED";   break;
+    case AVAILABLE: setRgb(0, 1, 0); angle = 0; colour = "GREEN"; break;
+    case CROWDED: setRgb(1, 1, 0); angle = 90; colour = "AMBER"; break;   // red + green = amber
+    default: setRgb(1, 0, 0); angle = 180; colour = "RED"; break;
   }
   flagServo.write(angle);
   return colour;
@@ -337,8 +340,8 @@ void drawOled() {
   oled.clearDisplay();
   oled.setTextColor(SSD1306_WHITE);
   oled.setTextSize(1);
-  oled.setCursor(0, 0);  oled.print(f.name);
-  oled.setTextSize(2);
+  oled.setCursor(0, 0); oled.print(f.name);
+  oled.setTextSize(2);   // status in big letters
   oled.setCursor(0, 12); oled.print(status == UNAVAILABLE ? "CLOSED" : (status == CROWDED ? "BUSY" : "FREE"));
   oled.setTextSize(1);
   oled.setCursor(0, 32);
@@ -351,10 +354,12 @@ void drawOled() {
   oled.display();
 }
 
-// ---------------- Network (never blocks the sensors for long) ----------------
+// ---- network ----
+// none of these wait long, the sensors and LED must keep working without wifi
+
 void serviceWifi() {
   if (WiFi.status() == WL_CONNECTED) { wifiRetries = 0; return; }
-  if (millis() - lastWifiTry < 5000) return;
+  if (millis() - lastWifiTry < 5000) return;   // try again every 5s
   lastWifiTry = millis();
   wifiRetries++;
   Serial.printf("[NET ] Wi-Fi not connected, retry %d\n", wifiRetries);
@@ -374,6 +379,8 @@ void serviceMqtt() {
   }
 }
 
+// one JSON message with everything the dashboard needs.
+// a broken sensor is sent as null, not 0, so it can't be mistaken for a real reading
 String buildPayload(const char* colour, int angle) {
   const Facility& f = FACILITIES[current];
   JsonDocument doc;
@@ -386,9 +393,9 @@ String buildPayload(const char* colour, int angle) {
   doc["uptime_s"] = (millis() - bootMs) / 1000;
   JsonObject t = doc["telemetry"].to<JsonObject>();
   if (raw.distOk) t["distance_cm"] = round(sDist.mean() * 10) / 10.0; else t["distance_cm"] = nullptr;
-  if (raw.dhtOk)  { t["temp_c"] = round(sTemp.mean() * 10) / 10.0; t["humidity_pct"] = round(sHum.mean()); }
-  else            { t["temp_c"] = nullptr; t["humidity_pct"] = nullptr; }
-  if (raw.ldrOk)  t["light_lux"] = round(sLux.mean()); else t["light_lux"] = nullptr;
+  if (raw.dhtOk) { t["temp_c"] = round(sTemp.mean() * 10) / 10.0; t["humidity_pct"] = round(sHum.mean()); }
+  else { t["temp_c"] = nullptr; t["humidity_pct"] = nullptr; }
+  if (raw.ldrOk) t["light_lux"] = round(sLux.mean()); else t["light_lux"] = nullptr;
   t["motion"] = raw.motion;
   t["pir_ratio_30s"] = round(pirRatio() * 100) / 100.0;
   JsonObject ai = doc["edge_ai"].to<JsonObject>();
@@ -397,8 +404,8 @@ String buildPayload(const char* colour, int angle) {
   ai["spike_detected"] = raw.spike;
   JsonArray faults = doc["sensor_faults"].to<JsonArray>();
   if (!raw.distOk) faults.add("ultrasonic");
-  if (!raw.dhtOk)  faults.add("dht22");
-  if (!raw.ldrOk)  faults.add("ldr");
+  if (!raw.dhtOk) faults.add("dht22");
+  if (!raw.ldrOk) faults.add("ldr");
   JsonObject act = doc["actuators"].to<JsonObject>();
   act["rgb"] = colour; act["servo_deg"] = angle; act["buzzer"] = STATUS_NAME[status];
   JsonObject net = doc["network"].to<JsonObject>();
@@ -412,14 +419,15 @@ String buildPayload(const char* colour, int angle) {
 void publish(const String& payload) {
   if (!mqtt.connected()) { lastMqttOk = false; return; }
   String topic = String(MQTT_BASE) + "/" + FACILITIES[current].key;
-  lastMqttOk = mqtt.publish(topic.c_str(), payload.c_str(), true);   // retained: dashboard sees the latest at once
+  // retained, so when the dashboard opens it gets the last status straight away
+  lastMqttOk = mqtt.publish(topic.c_str(), payload.c_str(), true);
   Serial.printf("[MQTT] publish %s -> %s (%u bytes)\n", topic.c_str(), lastMqttOk ? "OK" : "FAILED", payload.length());
 }
 
 void postHttp(const String& payload) {
   if (WiFi.status() != WL_CONNECTED) return;
   HTTPClient http;
-  http.setTimeout(4000);
+  http.setTimeout(4000);   // posts through wokwi take 1-3s, give up after 4
   unsigned long t0 = millis();
   if (!http.begin(httpClient, HTTP_URL)) { Serial.println("[HTTP] begin failed"); return; }
   http.addHeader("Content-Type", "application/json");
@@ -433,28 +441,27 @@ void postHttp(const String& payload) {
   http.end();
 }
 
-// ---------------- Buttons ----------------
+// buttons use INPUT_PULLUP so pressed = LOW. a change only counts if it stays for 40ms
 void serviceButtons() {
   for (auto& b : buttons) {
     bool r = digitalRead(b.pin);
     if (r != b.lastRaw) { b.lastRaw = r; b.changedAt = millis(); }
     if (millis() - b.changedAt > DEBOUNCE_MS && r != b.stable) {
       b.stable = r;
-      if (r == LOW) {                         // pressed (INPUT_PULLUP)
+      if (r == LOW) {
         current = b.fac;
-        // each facility starts with a fresh history (filters + PIR window)
+        // start fresh for the new facility, otherwise the old averages mix in
         sDist.reset(); sTemp.reset(); sHum.reset(); sLux.reset();
         pirCount = 0; pirIdx = 0;
         Serial.printf("[BTN ] query: %s\n", FACILITIES[current].name);
         static const Beep click[] = { {2600, 40, 60} };
         playPattern(click, 1);
-        lastStatus = (Status)255;             // force a fresh announcement + publish
+        lastStatus = (Status)255;   // so the answer is announced again even if it's the same
       }
     }
   }
 }
 
-// ---------------- Setup + main loop ----------------
 void setup() {
   Serial.begin(115200);
   bootMs = millis();
@@ -470,6 +477,7 @@ void setup() {
   flagServo.setPeriodHertz(50);
   flagServo.attach(PIN_SERVO, 500, 2400);
 
+  // if the screen is missing just carry on with the other outputs
   if (!oled.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println("[OLED] not found - continuing with LED, servo and buzzer only");
   } else {
@@ -485,8 +493,8 @@ void setup() {
   WiFi.begin(WIFI_SSID, WIFI_PASS, 6);
   lastWifiTry = millis();
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
-  mqtt.setBufferSize(1024);
-  mqtt.setKeepAlive(45);         // the simulator's network gateway adds latency
+  mqtt.setBufferSize(1024);   // default 256 is too small for the JSON
+  mqtt.setKeepAlive(45);      // wokwi's gateway is slow, 15s kept timing out
   mqtt.setSocketTimeout(10);
   Serial.println("[BOOT] ready - press a button to choose a facility (default: Library Zone)");
 }
@@ -506,8 +514,9 @@ void loop() {
   }
 
   unsigned long now = millis();
-  if (now - bootMs < SENSOR_WARMUP_MS) return;   // let the DHT22 settle before the first decision
-  if (now - lastSample >= 1000) {                 // 1 Hz sense -> think -> act
+  if (now - bootMs < SENSOR_WARMUP_MS) return;
+  // once a second: read -> decide -> show
+  if (now - lastSample >= 1000) {
     lastSample = now;
     sampleSensors();
     classify();
@@ -515,6 +524,7 @@ void loop() {
     int angle = status == AVAILABLE ? 0 : (status == CROWDED ? 90 : 180);
     drawOled();
 
+    // one line per second: raw values, averages, model output and decision
     Serial.printf("[TEL ] t=%lus fac=%s | RAW dist=%s temp=%s hum=%s lux=%s pir=%d | AVG dist=%.0f temp=%.1f lux=%.0f pir30=%.2f | AI occ=%.2f comfort=%s%s | %s (%s) | LED=%s servo=%d\n",
       (now - bootMs) / 1000, FACILITIES[current].key,
       raw.distOk ? String(raw.distCm, 0).c_str() : "ERR",
@@ -528,8 +538,8 @@ void loop() {
       STATUS_NAME[status], reason.c_str(), colour, angle);
 
     if (!raw.distOk) Serial.println("[WARN] ultrasonic: no echo (unplugged or out of range) - using other sensors");
-    if (!raw.dhtOk)  Serial.println("[WARN] DHT22: read failed - comfort check skipped");
-    if (!raw.ldrOk)  Serial.println("[WARN] LDR: reading at the rail - check wiring");
+    if (!raw.dhtOk) Serial.println("[WARN] DHT22: read failed - comfort check skipped");
+    if (!raw.ldrOk) Serial.println("[WARN] LDR: reading at the rail - check wiring");
 
     bool changed = status != lastStatus;
     if (changed) {
@@ -538,7 +548,9 @@ void loop() {
       announceStatus(status);
       lastStatus = status;
     }
-    if (changed || now - lastPublish >= 10000) {   // publish on change, plus a heartbeat every 10 s
+    // send on every change, and every 10s anyway so the dashboard knows we're alive.
+    // http only every 30s (or on change) because each post takes 1-3s
+    if (changed || now - lastPublish >= 10000) {
       lastPublish = now;
       String payload = buildPayload(colour, angle);
       publish(payload);
