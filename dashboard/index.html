@@ -71,7 +71,7 @@
       (faults.length ? '⚠ Sensor fault: ' + faults.join(', ') + ' — decision made with the remaining sensors. ' : '') +
       (ai.spike_detected ? '⚠ Sudden spike ignored by the anomaly filter.' : '');
     card.querySelector('.meta').textContent =
-      `Last update ${new Date().toLocaleTimeString()} · uptime ${p.uptime_s}s · Wi-Fi RSSI ${n.rssi_dbm} dBm · last HTTP ${n.last_http_code || '-'} in ${n.last_http_ms || '-'} ms · node ${p.node}`;
+      `Received ${new Date().toLocaleTimeString()} · uptime ${p.uptime_s}s · Wi-Fi RSSI ${n.rssi_dbm} dBm · last HTTP ${n.last_http_code || '-'} in ${n.last_http_ms || '-'} ms · node ${p.node}`;
   }
 
   const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
