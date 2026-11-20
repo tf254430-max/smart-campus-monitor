@@ -13,9 +13,10 @@ Wi-Fi.
 **Run it in Wokwi:** https://wokwi.com/projects/480950410010713089 (press the green Start button; the first build may wait a minute in Wokwi's free queue)
 
 **Live dashboard:** https://tf254430-max.github.io/smart-campus-monitor/dashboard/
-(it subscribes to the same MQTT topics the ESP32 publishes to; the last message
-from each facility is kept on the broker, so the cards fill in even when the
-simulation is not running).
+(it subscribes to the same MQTT topics the ESP32 publishes to. The node sends
+its messages as retained, but the free public broker does not keep them for long,
+so when the simulation is not running the cards show the last real messages the
+node sent, marked RECORDED. Start the Wokwi simulation and they switch to LIVE.)
 
 ---
 

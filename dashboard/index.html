@@ -27,6 +27,10 @@
   .warn { color:#fca5a5; font-size:12px; margin-top:6px; min-height:16px; }
   .meta { color:var(--mute); font-size:12px; margin-top:8px; }
   #log { grid-column:1/-1; }
+  .badge { font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; margin-left:8px; vertical-align:middle; }
+  .badge.live { background:#14532d; color:#bbf7d0; } .badge.rec { background:#334155; color:#cbd5e1; }
+  #note { margin:16px 24px 0; padding:12px 16px; border-radius:10px; background:#1e293b; border:1px solid var(--line); font-size:14px; line-height:1.5; display:none; }
+  #note a { color:#7dd3fc; }
   #log pre { margin:0; max-height:260px; overflow:auto; font-size:12px; color:#cbd5e1; white-space:pre-wrap; }
 </style>
 </head>
@@ -38,6 +42,7 @@
   </div>
   <span id="conn" class="pill">connecting…</span>
 </header>
+<div id="note"></div>
 <main>
   <section class="card" id="card-library"><h2>📚 Library Zone</h2><div class="status">waiting…</div><div class="reason"></div><table></table><div class="warn"></div><div class="meta"></div></section>
   <section class="card" id="card-lab"><h2>💻 Computer Lab</h2><div class="status">waiting…</div><div class="reason"></div><table></table><div class="warn"></div><div class="meta"></div></section>
@@ -48,11 +53,26 @@
   const BASE = 'cavendish/bda2201/254430/campus/';
   const conn = document.getElementById('conn');
   const logEl = document.querySelector('#log pre');
+  const note = document.getElementById('note');
+  const WOKWI = 'https://wokwi.com/projects/480950410010713089';
+
+  // the public broker does not keep retained messages for long, so when the
+  // simulation is not running there is nothing to receive. in that case the page
+  // shows the last real messages the node sent (copied from the broker on
+  // 21 nov 2026, wokwi project above) so the cards are never empty.
+  // they are marked "recorded" and get replaced as soon as a live one arrives.
+  const LAST = {"library":{"at":"2026-11-21 00:25","msg":{"node":"cuu-main-block-01","facility":"Library Zone","facility_key":"library","status":"AVAILABLE","reason":"free and comfortable","low_confidence":false,"uptime_s":13,"telemetry":{"distance_cm":253.5,"temp_c":24,"humidity_pct":55,"light_lux":411,"motion":false,"pir_ratio_30s":0},"edge_ai":{"occupancy_score":0.04,"comfort_index":1,"spike_detected":false},"sensor_faults":[],"actuators":{"rgb":"GREEN","servo_deg":0,"buzzer":"AVAILABLE"},"network":{"rssi_dbm":-83,"last_http_code":200,"last_http_ms":1332}}},"lab":{"at":"2026-11-21 00:26","msg":{"node":"cuu-main-block-01","facility":"Computer Lab","facility_key":"lab","status":"UNAVAILABLE","reason":"too hot to use","low_confidence":false,"uptime_s":31,"telemetry":{"distance_cm":253.6,"temp_c":34,"humidity_pct":55,"light_lux":411,"motion":false,"pir_ratio_30s":0},"edge_ai":{"occupancy_score":0.09,"comfort_index":0,"spike_detected":false},"sensor_faults":[],"actuators":{"rgb":"RED","servo_deg":180,"buzzer":"UNAVAILABLE"},"network":{"rssi_dbm":-89,"last_http_code":200,"last_http_ms":1569}}},"pod":{"at":"2026-11-21 00:26","msg":{"node":"cuu-main-block-01","facility":"Accessible Study Pod","facility_key":"pod","status":"CROWDED","reason":"pod in use","low_confidence":false,"uptime_s":20,"telemetry":{"distance_cm":253.5,"temp_c":24,"humidity_pct":55,"light_lux":411,"motion":true,"pir_ratio_30s":0.25},"edge_ai":{"occupancy_score":0.07,"comfort_index":1,"spike_detected":false},"sensor_faults":[],"actuators":{"rgb":"AMBER","servo_deg":90,"buzzer":"CROWDED"},"network":{"rssi_dbm":-92,"last_http_code":200,"last_http_ms":1606}}}};
+  const live = {}, kept = {};
+
   const fmt = (v, unit) => (v === null || v === undefined) ? '<span style="color:#fca5a5">sensor offline</span>' : v + (unit || '');
 
-  function render(key, p) {
+  // label: null for a live message, otherwise a short note on where it came from
+  function render(key, p, label) {
     const card = document.getElementById('card-' + key);
     if (!card) return;
+    const h2 = card.querySelector('h2');
+    const old = h2.querySelector('.badge'); if (old) old.remove();
+    h2.insertAdjacentHTML('beforeend', label ? '<span class="badge rec">RECORDED</span>' : '<span class="badge live">LIVE</span>');
     const st = card.querySelector('.status');
     st.textContent = p.status + (p.low_confidence ? ' *' : '');
     st.className = 'status ' + p.status;
@@ -71,9 +91,26 @@
       (faults.length ? '⚠ Sensor fault: ' + faults.join(', ') + ' — decision made with the remaining sensors. ' : '') +
       (ai.spike_detected ? '⚠ Sudden spike ignored by the anomaly filter.' : '');
     card.querySelector('.meta').textContent =
-      `Received ${new Date().toLocaleTimeString()} · uptime ${p.uptime_s}s · Wi-Fi RSSI ${n.rssi_dbm} dBm · last HTTP ${n.last_http_code || '-'} in ${n.last_http_ms || '-'} ms · node ${p.node}`;
+      (label || `Received ${new Date().toLocaleTimeString()}`) + ` · uptime ${p.uptime_s}s · Wi-Fi RSSI ${n.rssi_dbm} dBm · last HTTP ${n.last_http_code || '-'} in ${n.last_http_ms || '-'} ms · node ${p.node}`;
   }
 
+  function showRecorded() {
+    for (const key in LAST) if (!live[key] && !kept[key]) render(key, LAST[key].msg, `Recorded ${LAST[key].at} (EAT)`);
+    if (Object.keys(live).length) return;
+    note.style.display = 'block';
+    note.innerHTML = '<b>No live data right now.</b> The ESP32 only sends messages while the Wokwi simulation is running, ' +
+      'so the cards marked RECORDED show the last real messages it sent. To watch it live, open the ' +
+      `<a href="${WOKWI}" target="_blank" rel="noopener">Wokwi project</a> and press the green Start button. ` +
+      'The cards switch to LIVE about a minute later (the free Wokwi plan queues the build first).';
+  }
+  // give a running simulation a few seconds to answer before falling back
+  setTimeout(showRecorded, 6000);
+
+  // some networks block the mqtt library or websockets; the recorded cards still show
+  if (typeof mqtt === 'undefined') {
+    conn.textContent = 'MQTT blocked on this network'; conn.className = 'pill off';
+    throw new Error('mqtt library did not load');
+  }
   const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
     clientId: 'cuu-dashboard-' + Math.random().toString(16).slice(2, 8), reconnectPeriod: 3000,
   });
@@ -82,10 +119,20 @@
     client.subscribe(BASE + '#', { qos: 0 });
   });
   client.on('close', () => { conn.textContent = 'MQTT disconnected – retrying'; conn.className = 'pill off'; });
-  client.on('message', (topic, buf) => {
+  client.on('message', (topic, buf, packet) => {
     let p; try { p = JSON.parse(buf.toString()); } catch (e) { return; }
     const key = topic.substring(BASE.length);
+    // a retained message is the broker replaying an old one, not the node talking now
+    if (packet && packet.retain) {
+      if (!live[key]) { kept[key] = true; render(key, p, 'Last message kept by the broker (sent earlier)'); }
+      logEl.textContent = `${new Date().toLocaleTimeString()}  ${topic}  ${p.status}  (kept by broker, sent earlier)` + '\n' + logEl.textContent;
+      return;
+    }
+    live[key] = true;
     render(key, p);
+    note.style.display = 'block';
+    note.innerHTML = '<b>Live:</b> receiving messages from the ESP32 simulation.' +
+      (Object.keys(LAST).some(k => !live[k]) ? ' Cards still marked RECORDED have not sent a new message yet (press the button for that facility in Wokwi).' : '');
     const line = `${new Date().toLocaleTimeString()}  ${topic}  ${p.status}  (${p.reason})  ${buf.length} bytes`;
     logEl.textContent = line + '\n' + logEl.textContent;
   });
