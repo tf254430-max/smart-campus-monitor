@@ -4,75 +4,127 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Smart Campus Monitor - Live Dashboard</title>
-<!-- MQTT over secure WebSockets, same broker the ESP32 publishes to -->
+<!-- MQTT over secure WebSockets (same broker the ESP32 publishes to), the
+     Supabase client for the database, and Chart.js for the history chart -->
 <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   :root { --bg:#0f172a; --card:#111c33; --line:#22314f; --txt:#e2e8f0; --mute:#94a3b8;
           --ok:#16a34a; --busy:#f59e0b; --no:#dc2626; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:'Segoe UI',Arial,sans-serif; background:var(--bg); color:var(--txt); }
-  header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   header h1 { font-size:20px; margin:0; }
   header .sub { color:var(--mute); font-size:13px; }
-  .pill { margin-left:auto; padding:6px 12px; border-radius:999px; font-size:13px; background:#1e293b; }
+  .pills { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; }
+  .pill { padding:6px 12px; border-radius:999px; font-size:13px; background:#1e293b; }
   .pill.on { background:#14532d; } .pill.off { background:#7f1d1d; }
   main { padding:20px 24px; display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; min-width:0; }
   .card h2 { margin:0 0 6px; font-size:16px; }
   .status { font-size:26px; font-weight:800; margin:6px 0 2px; }
   .AVAILABLE { color:var(--ok); } .CROWDED { color:var(--busy); } .UNAVAILABLE { color:var(--no); }
   .reason { color:var(--mute); font-size:13px; min-height:18px; }
   table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
-  td { padding:4px 0; border-bottom:1px dashed var(--line); } td:last-child { text-align:right; }
+  td, th { padding:4px 6px 4px 0; border-bottom:1px dashed var(--line); text-align:left; }
+  .facility td:last-child { text-align:right; }
   .warn { color:#fca5a5; font-size:12px; margin-top:6px; min-height:16px; }
   .meta { color:var(--mute); font-size:12px; margin-top:8px; }
-  #log { grid-column:1/-1; }
+  .wide { grid-column:1/-1; }
   .badge { font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; margin-left:8px; vertical-align:middle; }
   .badge.live { background:#14532d; color:#bbf7d0; } .badge.rec { background:#334155; color:#cbd5e1; }
   #note { margin:16px 24px 0; padding:12px 16px; border-radius:10px; background:#1e293b; border:1px solid var(--line); font-size:14px; line-height:1.5; display:none; }
   #note a { color:#7dd3fc; }
-  #log pre { margin:0; max-height:260px; overflow:auto; font-size:12px; color:#cbd5e1; white-space:pre-wrap; }
+  #log pre { margin:0; max-height:220px; overflow:auto; font-size:12px; color:#cbd5e1; white-space:pre-wrap; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:10px 0 14px; }
+  .stat { background:#0b1428; border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .stat b { display:block; font-size:22px; } .stat span { color:var(--mute); font-size:12px; }
+  .row-tools { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:8px; }
+  select, button { background:#1e293b; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:13px; }
+  button { cursor:pointer; } button:hover { background:#273449; }
+  .scroll { max-height:380px; overflow:auto; }
+  #rows th { position:sticky; top:0; background:var(--card); color:var(--mute); font-weight:600; }
+  #rows tr.new td { animation:flash 3s ease-out; }
+  @keyframes flash { from { background:#14532d; } to { background:transparent; } }
+  .chart-box { position:relative; height:260px; }
+  .muted { color:var(--mute); font-size:12px; }
 </style>
 </head>
 <body>
 <header>
   <div>
     <h1>Smart Campus Resource &amp; Accessibility Monitor</h1>
-    <div class="sub">Cavendish University Uganda · BDA 2201 CAT 2 · Tinka Fahad (254430) · MQTT broker.hivemq.com</div>
+    <div class="sub">Cavendish University Uganda · BDA 2201 CAT 2 · Tinka Fahad (254430) · MQTT broker.hivemq.com · database: Supabase PostgreSQL</div>
   </div>
-  <span id="conn" class="pill">connecting…</span>
+  <div class="pills"><span id="conn" class="pill">MQTT connecting…</span><span id="dbpill" class="pill">Database connecting…</span></div>
 </header>
 <div id="note"></div>
 <main>
-  <section class="card" id="card-library"><h2>📚 Library Zone</h2><div class="status">waiting…</div><div class="reason"></div><table></table><div class="warn"></div><div class="meta"></div></section>
-  <section class="card" id="card-lab"><h2>💻 Computer Lab</h2><div class="status">waiting…</div><div class="reason"></div><table></table><div class="warn"></div><div class="meta"></div></section>
-  <section class="card" id="card-pod"><h2>♿ Accessible Study Pod</h2><div class="status">waiting…</div><div class="reason"></div><table></table><div class="warn"></div><div class="meta"></div></section>
-  <section class="card" id="log"><h2>Message log (newest first)</h2><pre></pre></section>
+  <section class="card facility" id="card-library"><h2>📚 Library Zone</h2><div class="status">waiting…</div><div class="reason"></div><table></table><div class="warn"></div><div class="meta"></div></section>
+  <section class="card facility" id="card-lab"><h2>💻 Computer Lab</h2><div class="status">waiting…</div><div class="reason"></div><table></table><div class="warn"></div><div class="meta"></div></section>
+  <section class="card facility" id="card-pod"><h2>♿ Accessible Study Pod</h2><div class="status">waiting…</div><div class="reason"></div><table></table><div class="warn"></div><div class="meta"></div></section>
+
+  <section class="card wide" id="db">
+    <h2>🗄️ Telemetry database (every reading the ESP32 saved)</h2>
+    <div class="muted">The ESP32 saves each reading with an HTTPS POST to a PostgreSQL table (<code>telemetry</code>) on Supabase. New rows appear here the moment they are saved.</div>
+    <div class="stats">
+      <div class="stat"><b id="s-total">–</b><span>rows in the database</span></div>
+      <div class="stat"><b id="s-hour">–</b><span>rows in the last hour</span></div>
+      <div class="stat"><b id="s-last">–</b><span>last row saved</span></div>
+      <div class="stat"><b id="s-http">–</b><span>average HTTPS save time</span></div>
+    </div>
+    <table id="summary"></table>
+  </section>
+
+  <section class="card wide">
+    <div class="row-tools">
+      <h2 style="margin:0">📈 History</h2>
+      <select id="chart-fac"><option value="library">Library Zone</option><option value="lab">Computer Lab</option><option value="pod">Accessible Study Pod</option></select>
+      <span class="muted">last 60 rows from the database: edge AI occupancy score, temperature and light</span>
+    </div>
+    <div class="chart-box"><canvas id="chart"></canvas></div>
+  </section>
+
+  <section class="card wide">
+    <div class="row-tools">
+      <h2 style="margin:0">🧾 Latest rows</h2>
+      <button id="csv">⬇ Download all rows (CSV)</button>
+      <span class="muted">the CSV is the training data for a future campus resource-allocation model</span>
+    </div>
+    <div class="scroll"><table id="rows"><thead><tr><th>#</th><th>Saved (EAT)</th><th>Facility</th><th>Status</th><th>Reason</th><th>Dist cm</th><th>Temp °C</th><th>Hum %</th><th>Lux</th><th>Motion</th><th>Occ</th><th>Comfort</th><th>Faults</th><th>LED / servo</th><th>Save ms</th></tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section class="card wide" id="log"><h2>MQTT message log (newest first)</h2><pre></pre></section>
 </main>
 <script>
   const BASE = 'cavendish/bda2201/254430/campus/';
-  const conn = document.getElementById('conn');
-  const logEl = document.querySelector('#log pre');
-  const note = document.getElementById('note');
   const WOKWI = 'https://wokwi.com/projects/480950410010713089';
+  // public values: the anon key can only add and read rows (row level security)
+  const DB_URL = 'https://djspmfczuognlrdqudjz.supabase.co';
+  const DB_KEY = 'sb_publishable_UOkUUs2qu98tufMPrAZlKQ_A35jTOEf';
+  const NAMES = { library: 'Library Zone', lab: 'Computer Lab', pod: 'Accessible Study Pod' };
 
-  // the public broker does not keep retained messages for long, so when the
-  // simulation is not running there is nothing to receive. in that case the page
-  // shows the last real messages the node sent (copied from the broker on
-  // 21 nov 2026, wokwi project above) so the cards are never empty.
-  // they are marked "recorded" and get replaced as soon as a live one arrives.
+  const $ = id => document.getElementById(id);
+  const conn = $('conn'), dbpill = $('dbpill'), note = $('note');
+  const logEl = document.querySelector('#log pre');
+
+  // last real messages from the node, used only if neither mqtt nor the database answer
   const LAST = {"library":{"at":"2026-11-21 00:25","msg":{"node":"cuu-main-block-01","facility":"Library Zone","facility_key":"library","status":"AVAILABLE","reason":"free and comfortable","low_confidence":false,"uptime_s":13,"telemetry":{"distance_cm":253.5,"temp_c":24,"humidity_pct":55,"light_lux":411,"motion":false,"pir_ratio_30s":0},"edge_ai":{"occupancy_score":0.04,"comfort_index":1,"spike_detected":false},"sensor_faults":[],"actuators":{"rgb":"GREEN","servo_deg":0,"buzzer":"AVAILABLE"},"network":{"rssi_dbm":-83,"last_http_code":200,"last_http_ms":1332}}},"lab":{"at":"2026-11-21 00:26","msg":{"node":"cuu-main-block-01","facility":"Computer Lab","facility_key":"lab","status":"UNAVAILABLE","reason":"too hot to use","low_confidence":false,"uptime_s":31,"telemetry":{"distance_cm":253.6,"temp_c":34,"humidity_pct":55,"light_lux":411,"motion":false,"pir_ratio_30s":0},"edge_ai":{"occupancy_score":0.09,"comfort_index":0,"spike_detected":false},"sensor_faults":[],"actuators":{"rgb":"RED","servo_deg":180,"buzzer":"UNAVAILABLE"},"network":{"rssi_dbm":-89,"last_http_code":200,"last_http_ms":1569}}},"pod":{"at":"2026-11-21 00:26","msg":{"node":"cuu-main-block-01","facility":"Accessible Study Pod","facility_key":"pod","status":"CROWDED","reason":"pod in use","low_confidence":false,"uptime_s":20,"telemetry":{"distance_cm":253.5,"temp_c":24,"humidity_pct":55,"light_lux":411,"motion":true,"pir_ratio_30s":0.25},"edge_ai":{"occupancy_score":0.07,"comfort_index":1,"spike_detected":false},"sensor_faults":[],"actuators":{"rgb":"AMBER","servo_deg":90,"buzzer":"CROWDED"},"network":{"rssi_dbm":-92,"last_http_code":200,"last_http_ms":1606}}}};
-  const live = {}, kept = {};
+  const live = {}, shown = {};
+  let subscribedAt = 0;
 
   const fmt = (v, unit) => (v === null || v === undefined) ? '<span style="color:#fca5a5">sensor offline</span>' : v + (unit || '');
+  const eat = t => new Date(t).toLocaleString('en-GB', { timeZone: 'Africa/Kampala', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-  // label: null for a live message, otherwise a short note on where it came from
+  // label: null for a live message, otherwise where the reading came from
   function render(key, p, label) {
-    const card = document.getElementById('card-' + key);
-    if (!card) return;
+    const card = $('card-' + key);
+    if (!card || !p) return;
+    shown[key] = label ? 'old' : 'live';
     const h2 = card.querySelector('h2');
     const old = h2.querySelector('.badge'); if (old) old.remove();
-    h2.insertAdjacentHTML('beforeend', label ? '<span class="badge rec">RECORDED</span>' : '<span class="badge live">LIVE</span>');
+    h2.insertAdjacentHTML('beforeend', label ? '<span class="badge rec">LAST SAVED</span>' : '<span class="badge live">LIVE</span>');
     const st = card.querySelector('.status');
     st.textContent = p.status + (p.low_confidence ? ' *' : '');
     st.className = 'status ' + p.status;
@@ -91,51 +143,190 @@
       (faults.length ? '⚠ Sensor fault: ' + faults.join(', ') + ' — decision made with the remaining sensors. ' : '') +
       (ai.spike_detected ? '⚠ Sudden spike ignored by the anomaly filter.' : '');
     card.querySelector('.meta').textContent =
-      (label || `Received ${new Date().toLocaleTimeString()}`) + ` · uptime ${p.uptime_s}s · Wi-Fi RSSI ${n.rssi_dbm} dBm · last HTTP ${n.last_http_code || '-'} in ${n.last_http_ms || '-'} ms · node ${p.node}`;
+      (label || `Received ${new Date().toLocaleTimeString()}`) +
+      ` · uptime ${p.uptime_s}s · Wi-Fi RSSI ${n.rssi_dbm} dBm · last HTTPS save ${n.last_http_code || '-'} in ${n.last_http_ms || '-'} ms · node ${p.node}`;
   }
 
-  function showRecorded() {
-    for (const key in LAST) if (!live[key] && !kept[key]) render(key, LAST[key].msg, `Recorded ${LAST[key].at} (EAT)`);
-    if (Object.keys(live).length) return;
+  function showNote() {
     note.style.display = 'block';
-    note.innerHTML = '<b>No live data right now.</b> The ESP32 only sends messages while the Wokwi simulation is running, ' +
-      'so the cards marked RECORDED show the last real messages it sent. To watch it live, open the ' +
-      `<a href="${WOKWI}" target="_blank" rel="noopener">Wokwi project</a> and press the green Start button. ` +
-      'The cards switch to LIVE about a minute later (the free Wokwi plan queues the build first).';
-  }
-  // give a running simulation a few seconds to answer before falling back
-  setTimeout(showRecorded, 6000);
-
-  // some networks block the mqtt library or websockets; the recorded cards still show
-  if (typeof mqtt === 'undefined') {
-    conn.textContent = 'MQTT blocked on this network'; conn.className = 'pill off';
-    throw new Error('mqtt library did not load');
-  }
-  const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
-    clientId: 'cuu-dashboard-' + Math.random().toString(16).slice(2, 8), reconnectPeriod: 3000,
-  });
-  client.on('connect', () => {
-    conn.textContent = 'MQTT connected'; conn.className = 'pill on';
-    client.subscribe(BASE + '#', { qos: 0 });
-  });
-  client.on('close', () => { conn.textContent = 'MQTT disconnected – retrying'; conn.className = 'pill off'; });
-  client.on('message', (topic, buf, packet) => {
-    let p; try { p = JSON.parse(buf.toString()); } catch (e) { return; }
-    const key = topic.substring(BASE.length);
-    // a retained message is the broker replaying an old one, not the node talking now
-    if (packet && packet.retain) {
-      if (!live[key]) { kept[key] = true; render(key, p, 'Last message kept by the broker (sent earlier)'); }
-      logEl.textContent = `${new Date().toLocaleTimeString()}  ${topic}  ${p.status}  (kept by broker, sent earlier)` + '\n' + logEl.textContent;
+    if (Object.keys(live).length) {
+      note.innerHTML = '<b>Live:</b> the ESP32 simulation is running. Cards update from MQTT and every saved reading is added to the database table below.';
       return;
     }
-    live[key] = true;
-    render(key, p);
-    note.style.display = 'block';
-    note.innerHTML = '<b>Live:</b> receiving messages from the ESP32 simulation.' +
-      (Object.keys(LAST).some(k => !live[k]) ? ' Cards still marked RECORDED have not sent a new message yet (press the button for that facility in Wokwi).' : '');
-    const line = `${new Date().toLocaleTimeString()}  ${topic}  ${p.status}  (${p.reason})  ${buf.length} bytes`;
-    logEl.textContent = line + '\n' + logEl.textContent;
-  });
+    note.innerHTML = '<b>The simulation is not running right now</b>, so the cards show the last reading saved for each facility. ' +
+      `To watch it live, open the <a href="${WOKWI}" target="_blank" rel="noopener">Wokwi project</a> and press the green Start button. ` +
+      'About a minute later (the free Wokwi plan queues the build first) the cards switch to LIVE and new rows appear in the database section.';
+  }
+
+  // mqtt: live cards
+  try {
+    const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
+      clientId: 'cuu-dashboard-' + Math.random().toString(16).slice(2, 8), reconnectPeriod: 3000,
+    });
+    client.on('connect', () => {
+      conn.textContent = 'MQTT connected'; conn.className = 'pill on';
+      subscribedAt = Date.now();
+      client.subscribe(BASE + '#', { qos: 0 });
+    });
+    client.on('close', () => { conn.textContent = 'MQTT reconnecting'; conn.className = 'pill off'; });
+    client.on('message', (topic, buf, packet) => {
+      let p; try { p = JSON.parse(buf.toString()); } catch (e) { return; }
+      const key = topic.substring(BASE.length);
+      // right after subscribing the broker replays what it kept (old messages).
+      // hivemq keeps the retain flag on live ones too, so the timing tells them apart
+      if (packet && packet.retain && Date.now() - subscribedAt < 3000) {
+        if (!live[key] && shown[key] !== 'old') render(key, p, 'Last message kept by the broker');
+        return;
+      }
+      live[key] = true;
+      render(key, p);
+      showNote();
+      logEl.textContent = `${new Date().toLocaleTimeString()}  ${topic}  ${p.status}  (${p.reason})  ${buf.length} bytes\n` + logEl.textContent;
+    });
+  } catch (e) {
+    // some networks block the library or websockets; the database part still works
+    conn.textContent = 'MQTT blocked on this network'; conn.className = 'pill off';
+  }
+
+  // database
+  let db = null, rows = [], chart = null, total = 0;
+  const COLS = 'id,received_at,facility,facility_key,status,reason,distance_cm,temp_c,humidity_pct,light_lux,motion,occupancy_score,comfort_index,sensor_faults,led_colour,servo_deg,last_http_ms,payload';
+
+  function rowHtml(r, isNew) {
+    const n = v => (v === null || v === undefined) ? '<span style="color:#fca5a5">–</span>' : v;
+    const faults = (r.sensor_faults && r.sensor_faults !== '[]') ? r.sensor_faults.replace(/[\[\]"]/g, '') : '';
+    return `<tr${isNew ? ' class="new"' : ''}><td>${r.id}</td><td>${eat(r.received_at)}</td><td>${r.facility}</td>` +
+      `<td class="${r.status}"><b>${r.status}</b></td><td>${r.reason || ''}</td><td>${n(r.distance_cm)}</td><td>${n(r.temp_c)}</td>` +
+      `<td>${n(r.humidity_pct)}</td><td>${n(r.light_lux)}</td><td>${r.motion ? 'yes' : 'no'}</td>` +
+      `<td>${r.occupancy_score === null ? '–' : Math.round(r.occupancy_score * 100) + '%'}</td><td>${n(r.comfort_index)}</td>` +
+      `<td style="color:#fca5a5">${faults}</td><td>${r.led_colour} / ${r.servo_deg}°</td><td>${n(r.last_http_ms)}</td></tr>`;
+  }
+
+  function drawRows() {
+    document.querySelector('#rows tbody').innerHTML = rows.slice(0, 100).map(r => rowHtml(r, r._new)).join('');
+    rows.forEach(r => delete r._new);
+  }
+
+  function drawStats() {
+    $('s-total').textContent = total.toLocaleString();
+    const hourAgo = Date.now() - 3600e3;
+    $('s-hour').textContent = rows.filter(r => new Date(r.received_at) > hourAgo).length.toLocaleString();
+    $('s-last').textContent = rows.length ? eat(rows[0].received_at) : 'none yet';
+    const ms = rows.slice(0, 50).map(r => r.last_http_ms).filter(v => v > 0);
+    $('s-http').textContent = ms.length ? Math.round(ms.reduce((a, b) => a + b, 0) / ms.length) + ' ms' : '–';
+  }
+
+  async function drawSummary() {
+    const { data, error } = await db.from('status_summary').select('*');
+    if (error || !data) return;
+    const by = {};
+    data.forEach(d => { (by[d.facility] = by[d.facility] || {})[d.status] = d.readings; });
+    $('summary').innerHTML = '<tr><th>Facility</th><th class="AVAILABLE">AVAILABLE</th><th class="CROWDED">CROWDED</th><th class="UNAVAILABLE">UNAVAILABLE</th></tr>' +
+      Object.keys(by).sort().map(f => `<tr><td>${f}</td><td>${by[f].AVAILABLE || 0}</td><td>${by[f].CROWDED || 0}</td><td>${by[f].UNAVAILABLE || 0}</td></tr>`).join('');
+  }
+
+  function drawChart() {
+    if (typeof Chart === 'undefined') return;
+    const key = $('chart-fac').value;
+    const pts = rows.filter(r => r.facility_key === key).slice(0, 60).reverse();
+    const labels = pts.map(r => eat(r.received_at).split(', ').pop());
+    const sets = [
+      { label: 'Occupancy score (%)', data: pts.map(r => r.occupancy_score === null ? null : Math.round(r.occupancy_score * 100)), borderColor: '#f59e0b', yAxisID: 'y' },
+      { label: 'Temperature (°C)', data: pts.map(r => r.temp_c), borderColor: '#ef4444', yAxisID: 'y' },
+      { label: 'Light (lux)', data: pts.map(r => r.light_lux), borderColor: '#38bdf8', yAxisID: 'y2' },
+    ];
+    if (!chart) {
+      chart = new Chart($('chart'), {
+        type: 'line', data: { labels, datasets: sets },
+        options: { responsive: true, maintainAspectRatio: false, animation: false, spanGaps: true,
+          plugins: { legend: { labels: { color: '#cbd5e1' } } },
+          scales: { x: { ticks: { color: '#94a3b8', maxTicksLimit: 10 } },
+                    y: { ticks: { color: '#94a3b8' }, title: { display: true, text: '% / °C', color: '#94a3b8' } },
+                    y2: { position: 'right', ticks: { color: '#94a3b8' }, grid: { drawOnChartArea: false }, title: { display: true, text: 'lux', color: '#94a3b8' } } } },
+      });
+    } else { chart.data.labels = labels; chart.data.datasets.forEach((d, i) => d.data = sets[i].data); chart.update(); }
+  }
+
+  // newest saved row per facility fills a card when nothing live has arrived for it
+  function fillCardsFromDb() {
+    ['library', 'lab', 'pod'].forEach(k => {
+      if (live[k]) return;
+      const r = rows.find(x => x.facility_key === k);
+      if (r) render(k, r.payload, `Last saved to the database ${eat(r.received_at)} (row ${r.id})`);
+    });
+  }
+
+  function onNewRow(r) {
+    if (rows.some(x => x.id === r.id)) return;
+    r._new = true; rows.unshift(r); total++;
+    if (rows.length > 500) rows.pop();
+    drawRows(); drawStats(); drawChart(); drawSummary();
+    dbpill.textContent = `Database: ${total.toLocaleString()} rows · new row #${r.id}`;
+    if (!live[r.facility_key]) { live[r.facility_key] = true; render(r.facility_key, r.payload); showNote(); }
+  }
+
+  async function loadDb() {
+    const res = await db.from('telemetry').select(COLS, { count: 'exact' }).order('received_at', { ascending: false }).limit(500);
+    if (res.error) throw res.error;
+    rows = res.data; total = res.count || rows.length;
+    drawRows(); drawStats(); drawChart(); drawSummary(); fillCardsFromDb();
+    dbpill.textContent = `Database: ${total.toLocaleString()} rows`; dbpill.className = 'pill on';
+  }
+
+  async function startDb() {
+    try {
+      db = supabase.createClient(DB_URL, DB_KEY);
+      await loadDb();
+      // supabase realtime pushes each INSERT; polling every 10 s is the backup if that is blocked
+      let realtimeOk = false;
+      db.channel('telemetry-inserts')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'telemetry' }, async ev => {
+          const { data } = await db.from('telemetry').select(COLS).eq('id', ev.new.id).single();
+          onNewRow(data || ev.new);
+        })
+        .subscribe(s => { realtimeOk = s === 'SUBSCRIBED'; });
+      setInterval(async () => {
+        if (realtimeOk) return;
+        const newest = rows.length ? rows[0].received_at : '1970-01-01';
+        const { data } = await db.from('telemetry').select(COLS).gt('received_at', newest).order('received_at');
+        (data || []).forEach(onNewRow);
+      }, 10000);
+    } catch (e) {
+      dbpill.textContent = 'Database unreachable'; dbpill.className = 'pill off';
+      for (const k in LAST) if (!live[k] && !shown[k]) render(k, LAST[k].msg, `Recorded ${LAST[k].at} (EAT)`);
+    }
+    showNote();
+  }
+
+  $('chart-fac').onchange = drawChart;
+
+  $('csv').onclick = async () => {
+    const btn = $('csv'); btn.disabled = true; btn.textContent = 'Preparing…';
+    try {
+      const cols = COLS.replace(',payload', '').split(',');
+      let all = [], from = 0;
+      for (;;) {   // supabase returns at most 1000 rows per request
+        const { data, error } = await db.from('telemetry').select(cols.join(',')).order('id').range(from, from + 999);
+        if (error) throw error;
+        all = all.concat(data);
+        if (data.length < 1000) break;
+        from += 1000;
+      }
+      const esc = v => v === null || v === undefined ? '' : /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+      const csv = [cols.join(',')].concat(all.map(r => cols.map(c => esc(r[c])).join(','))).join('\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+      a.download = 'smart_campus_telemetry.csv'; a.click();
+    } catch (e) { alert('Could not download: ' + (e.message || e)); }
+    btn.disabled = false; btn.textContent = '⬇ Download all rows (CSV)';
+  };
+
+  if (typeof supabase === 'undefined') {
+    dbpill.textContent = 'Database library blocked'; dbpill.className = 'pill off';
+    setTimeout(() => { for (const k in LAST) if (!live[k] && !shown[k]) render(k, LAST[k].msg, `Recorded ${LAST[k].at} (EAT)`); showNote(); }, 4000);
+  } else {
+    startDb();
+  }
 </script>
 </body>
 </html>

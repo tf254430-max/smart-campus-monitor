@@ -1,0 +1,19 @@
+SELECT id, to_char(received_at AT TIME ZONE 'Africa/Kampala', 'HH24:MI:SS') AS saved_eat,
+       facility, status, reason, temp_c, distance_cm, light_lux,
+       round(occupancy_score::numeric, 2) AS occ, last_http_ms
+FROM telemetry ORDER BY id DESC LIMIT 11;
+
+ id | saved_eat | facility             | status      | reason                           | temp_c | distance_cm | light_lux | occ  | last_http_ms
+----+-----------+----------------------+-------------+----------------------------------+--------+-------------+-----------+------+--------------
+ 11 | 01:33:00  | Accessible Study Pod | AVAILABLE   | free and comfortable             |   24.0 |        71.0 |     409.0 | 0.17 |          182
+ 10 | 01:32:53  | Accessible Study Pod | UNAVAILABLE | ramp/door blocked by an object   |   24.0 |        25.2 |     409.0 | 0.31 |          155
+  9 | 01:32:31  | Accessible Study Pod | AVAILABLE   | free and comfortable             |   24.0 |       253.6 |     409.0 | 0.04 |          158
+  8 | 01:32:14  | Computer Lab         | UNAVAILABLE | too hot to use                   |   34.0 |       253.4 |     409.0 | 0.09 |          201
+  7 | 01:31:57  | Computer Lab         | AVAILABLE   | free and comfortable             |   24.0 |       253.6 |     409.0 | 0.04 |          179
+  6 | 01:31:45  | Library Zone         | AVAILABLE   | free and comfortable             |   24.0 |        45.6 |     208.0 | 0.63 |          239
+  5 | 01:31:42  | Library Zone         | CROWDED     | degraded: poor light for reading |   24.0 |        45.6 |     108.0 | 0.65 |          182
+  4 | 01:31:32  | Library Zone         | UNAVAILABLE | lights off / too dark            |   24.0 |        45.4 |       8.0 | 0.73 |          175
+  3 | 01:31:19  | Library Zone         | CROWDED     | busy - occupancy 70%             |   24.0 |        45.6 |     411.0 | 0.71 |          190
+  2 | 01:30:55  | Library Zone         | AVAILABLE   | free and comfortable             |   24.0 |        45.6 |     411.0 | 0.46 |         3341
+  1 | 01:30:24  | Library Zone         | AVAILABLE   | free and comfortable             |   24.0 |       253.4 |     411.0 | 0.04 |            0
+(11 rows)

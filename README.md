@@ -7,16 +7,35 @@ One ESP32 node that a student can walk up to (or listen to) and ask: *"Is the
 Library Zone / Computer Lab / Accessible Study Pod free right now?"* The node
 reads its sensors, decides on the board itself whether the space is
 **AVAILABLE**, **CROWDED** or **UNAVAILABLE**, shows the answer with light,
-movement, sound and text, and sends every reading to a live web dashboard over
-Wi-Fi.
+movement, sound and text, and sends every reading over Wi-Fi to a live web
+dashboard (MQTT) and into a PostgreSQL database (Supabase, HTTPS POST).
 
 **Run it in Wokwi:** https://wokwi.com/projects/480950410010713089 (press the green Start button; the first build may wait a minute in Wokwi's free queue)
 
 **Live dashboard:** https://tf254430-max.github.io/smart-campus-monitor/dashboard/
-(it subscribes to the same MQTT topics the ESP32 publishes to. The node sends
-its messages as retained, but the free public broker does not keep them for long,
-so when the simulation is not running the cards show the last real messages the
-node sent, marked RECORDED. Start the Wokwi simulation and they switch to LIVE.)
+The cards update live from MQTT while the simulation runs. Below them the page
+reads the database: rows saved, status counts per facility, a history chart, the
+latest rows (new ones appear as the ESP32 saves them) and a CSV download of every
+row. When the simulation is not running, each card shows the last row saved for
+that facility, marked LAST SAVED.
+
+## Database
+
+Every status change, and a heartbeat every 15 s, is saved as one row in the
+PostgreSQL table `telemetry` on Supabase. The ESP32 POSTs `{"payload": <the same
+JSON it sends over MQTT>}` to `/rest/v1/telemetry` and gets **201** back when the
+row is saved. The table pulls the columns (facility, status, readings, edge AI
+outputs, actuators, RSSI, save time) out of the JSON itself, see
+[`database/schema.sql`](database/schema.sql).
+
+- The POST runs in its own FreeRTOS task on core 0. In Wokwi one HTTPS post can
+  take several seconds; doing it in `loop()` froze the buttons, so the main loop
+  only queues the reading.
+- The key in the firmware and the dashboard is the public (publishable) key.
+  Row level security lets it insert and read rows only; a DELETE with it is refused.
+- An offline sensor is stored as NULL, never as 0.
+- The rows are the training data for a future resource-allocation model
+  (dashboard: *Download all rows (CSV)*).
 
 ---
 
@@ -31,7 +50,8 @@ node sent, marked RECORDED. Start the Wokwi simulation and they switch to LIVE.)
 | `libraries.txt` | Libraries Wokwi needs to build the sketch |
 | `wokwi.toml` | Config for running the compiled firmware with the Wokwi VS Code extension / CLI |
 | `scenarios/` | Automated Wokwi test scenarios (Library, Lab, Pod, fault, light calibration) |
-| `dashboard/index.html` | MQTT live dashboard (works from GitHub Pages or by opening the file) |
+| `dashboard/index.html` | Live dashboard: MQTT cards + database panel, chart, rows, CSV (works from GitHub Pages or by opening the file) |
+| `database/schema.sql` | The PostgreSQL table, security rules and views (run once in the Supabase SQL editor) |
 | `evidence/` | Screenshots and serial logs from the test runs |
 
 ## Hardware
@@ -81,8 +101,9 @@ line. On every status change, and as a heartbeat every 10 s, the node:
 
 * publishes JSON to `cavendish/bda2201/254430/campus/<library|lab|pod>` on
   `broker.hivemq.com:1883` (retained), and
-* POSTs the same JSON to `http://httpbin.org/post` (on a change, otherwise
-  every 30 s) and records the response code and round-trip time. These are
+* saves the same JSON as a row in the Supabase PostgreSQL table `telemetry`
+  with an HTTPS POST (on a change, otherwise every 15 s, from a background task)
+  and records the response code (201 = saved) and round-trip time. These are
   shown on the dashboard.
 
 ## Running it

@@ -6,8 +6,10 @@
  * A student presses the button for the Library Zone, Computer Lab or the
  * Accessible Study Pod and the node tells them if it is free right now.
  * Answer is given 4 ways: RGB LED, servo flag, buzzer beeps (for blind
- * students) and the OLED screen. Every reading is also sent over wifi
- * (MQTT for the dashboard + HTTP POST so I can see the response code/time).
+ * students) and the OLED screen. Every reading is also sent over wifi:
+ * MQTT for the live dashboard, and an HTTPS POST that saves it as a row in a
+ * Postgres database (Supabase), so there is a history to look back on and to
+ * train a model with later. The response code/time of that POST is kept too.
  *
  * sensors: HC-SR04, PIR, DHT22, LDR module
  * decision: averages + spike filter -> logistic occupancy score + comfort
@@ -19,6 +21,7 @@
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <Wire.h>
@@ -54,7 +57,11 @@ const char* WIFI_PASS = "";
 const char* MQTT_HOST = "broker.hivemq.com";
 const int MQTT_PORT = 1883;
 const char* MQTT_BASE = "cavendish/bda2201/254430/campus";   // facility name is added at the end
-const char* HTTP_URL = "http://httpbin.org/post";            // httpbin just sends back what we post
+// supabase gives every table a REST endpoint. a POST adds one row, 201 = saved.
+// the anon key is the public one (it is in the dashboard too). the table only
+// allows insert + read for it, nobody can change or delete rows with it.
+const char* DB_URL = "https://djspmfczuognlrdqudjz.supabase.co/rest/v1/telemetry";
+const char* DB_KEY = "sb_publishable_UOkUUs2qu98tufMPrAZlKQ_A35jTOEf";
 
 // first run gave about 725 lux when the slider was on 400. after switching to
 // analogReadMilliVolts it was still ~21% high, so I tested 5 levels and scale by 0.825
@@ -88,7 +95,7 @@ Adafruit_SSD1306 oled(128, 64, &Wire, -1);
 DHTesp dht;
 Servo flagServo;
 WiFiClient netClient;    // for mqtt
-WiFiClient httpClient;   // http gets its own client. when they shared one, every POST dropped the mqtt connection
+WiFiClientSecure httpClient;   // https for the database. own client - when http and mqtt shared one, every POST dropped mqtt
 PubSubClient mqtt(netClient);
 
 // moving average with a spike check.
@@ -153,8 +160,9 @@ bool lowConfidence = false;
 unsigned long bootMs = 0;
 
 // kept so the dashboard can show the network response info
-int lastHttpCode = 0;
-unsigned long lastHttpMs = 0;
+// written by the database task on core 0, read by the main loop
+volatile int lastHttpCode = 0;
+volatile unsigned long lastHttpMs = 0;
 bool lastMqttOk = false;
 unsigned long lastMqttTry = 0, lastHttpPost = 0, lastWifiTry = 0;
 int wifiRetries = 0;
@@ -424,21 +432,54 @@ void publish(const String& payload) {
   Serial.printf("[MQTT] publish %s -> %s (%u bytes)\n", topic.c_str(), lastMqttOk ? "OK" : "FAILED", payload.length());
 }
 
+// database rows are saved by a separate task on core 0. in wokwi one https post
+// took ~9s, and when it ran in loop() the buttons and sensors froze for that long
+// (first test: a Lab button press was missed). now loop() only drops the reading
+// in a queue and carries on; the task sends it whenever the network is ready.
+struct DbJob { char body[1100]; };
+QueueHandle_t dbQueue;
+
 void postHttp(const String& payload) {
-  if (WiFi.status() != WL_CONNECTED) return;
-  HTTPClient http;
-  http.setTimeout(4000);   // posts through wokwi take 1-3s, give up after 4
-  unsigned long t0 = millis();
-  if (!http.begin(httpClient, HTTP_URL)) { Serial.println("[HTTP] begin failed"); return; }
-  http.addHeader("Content-Type", "application/json");
-  lastHttpCode = http.POST(payload);
-  lastHttpMs = millis() - t0;
-  if (lastHttpCode > 0) {
-    Serial.printf("[HTTP] POST %s -> %d in %lu ms (%d bytes back)\n", HTTP_URL, lastHttpCode, lastHttpMs, http.getSize());
-  } else {
-    Serial.printf("[HTTP] POST failed: %s (node keeps working offline)\n", http.errorToString(lastHttpCode).c_str());
+  DbJob job;
+  snprintf(job.body, sizeof(job.body), "{\"payload\":%s}", payload.c_str());
+  if (xQueueSend(dbQueue, &job, 0) != pdTRUE) {
+    // queue full (network very slow): drop the oldest row, keep the newest
+    DbJob old;
+    xQueueReceive(dbQueue, &old, 0);
+    xQueueSend(dbQueue, &job, 0);
+    Serial.println("[HTTP] database queue full, oldest row dropped");
   }
-  http.end();
+}
+
+void dbTask(void*) {
+  HTTPClient http;
+  http.setReuse(true);     // keep the https connection open between rows, the handshake is the slow part
+  http.setTimeout(10000);
+  DbJob job;
+  for (;;) {
+    if (xQueueReceive(dbQueue, &job, portMAX_DELAY) != pdTRUE) continue;
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("[HTTP] offline - row not saved (node keeps working)");
+      continue;
+    }
+    unsigned long t0 = millis();
+    if (!http.begin(httpClient, DB_URL)) { Serial.println("[HTTP] begin failed"); continue; }
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("apikey", DB_KEY);
+    http.addHeader("Authorization", String("Bearer ") + DB_KEY);
+    http.addHeader("Prefer", "return=minimal");   // don't send the row back, saves time
+    int code = http.POST(job.body);
+    lastHttpMs = millis() - t0;
+    lastHttpCode = code;
+    if (code == 201) {
+      Serial.printf("[HTTP] POST supabase telemetry -> 201 row saved in %lu ms\n", lastHttpMs);
+    } else if (code > 0) {
+      Serial.printf("[HTTP] POST supabase telemetry -> %d in %lu ms: %s\n", code, lastHttpMs, http.getString().substring(0, 120).c_str());
+    } else {
+      Serial.printf("[HTTP] POST failed: %s (node keeps working offline)\n", http.errorToString(code).c_str());
+    }
+    http.end();
+  }
 }
 
 // buttons use INPUT_PULLUP so pressed = LOW. a change only counts if it stays for 40ms
@@ -492,6 +533,11 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS, 6);
   lastWifiTry = millis();
+  // no certificate check: wokwi has no clock set at boot so a cert date check would fail.
+  // the link is still encrypted. on a real deployment I would pin supabase's root cert
+  httpClient.setInsecure();
+  dbQueue = xQueueCreate(6, sizeof(DbJob));
+  xTaskCreatePinnedToCore(dbTask, "db", 16384, nullptr, 1, nullptr, 0);   // tls needs a big stack
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setBufferSize(1024);   // default 256 is too small for the JSON
   mqtt.setKeepAlive(45);      // wokwi's gateway is slow, 15s kept timing out
@@ -549,12 +595,12 @@ void loop() {
       lastStatus = status;
     }
     // send on every change, and every 10s anyway so the dashboard knows we're alive.
-    // http only every 30s (or on change) because each post takes 1-3s
+    // database row on every change and every 15s (the task sends it in the background)
     if (changed || now - lastPublish >= 10000) {
       lastPublish = now;
       String payload = buildPayload(colour, angle);
       publish(payload);
-      if (changed || now - lastHttpPost >= 30000) { lastHttpPost = now; postHttp(payload); }
+      if (changed || now - lastHttpPost >= 15000) { lastHttpPost = now; postHttp(payload); }
     }
   }
 }
